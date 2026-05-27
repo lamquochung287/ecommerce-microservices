@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import { Observable, of, throwError } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { CachedService } from '@lib/cached';
 
 @Injectable()
@@ -22,6 +22,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<any>> {
     const ctx = context.switchToHttp();
     const req = ctx.getRequest<Request>();
+    const res = ctx.getResponse<Response>();
 
     // 1. Only enforce idempotency for modifying operations
     const safeMethods = ['GET', 'OPTIONS', 'HEAD', 'TRACE'];
@@ -52,9 +53,11 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
         if (parsed.status === 'resolved') {
           this.logger.log(`Returning cached response for key: ${idempotencyKey}`);
+          res.status(HttpStatus.OK); // Return 200 OK for subsequent hits
           return of(parsed.response);
         }
       }
+
 
       // 3. Mark key as processing
       await this.cachedService.set(
