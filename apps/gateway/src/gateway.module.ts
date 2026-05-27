@@ -2,13 +2,13 @@ import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { GatewayController } from './gateway.controller';
 import { GatewayService } from './gateway.service';
 import { ClientsModule, Transport } from '@nestjs/microservices';
-import { ConfigModule } from '@nestjs/config';
 import { NAME_SERVICE_TCP, PORT_TCP } from 'libs/constant/port-tcp.constant';
 import { UserModule } from './user/user.module';
 import { CachedModule } from '@lib/cached';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { IdempotencyInterceptor } from './common/interceptor/idempotency.interceptor';
 import { RequestTrackerMiddleware } from './common/middleware/request-tracker.middleware';
+import { CommonConfigModule } from '@lib/common';
 
 @Module({
 	imports: [
@@ -38,13 +38,11 @@ import { RequestTrackerMiddleware } from './common/middleware/request-tracker.mi
 				},
 			},
 		]),
-		ConfigModule.forRoot({
-			isGlobal: true,
-			envFilePath: '.env',
-		}),
+		CommonConfigModule,
 		CachedModule,
 		UserModule,
 	],
+
 	controllers: [GatewayController],
 	providers: [
 		GatewayService,
