@@ -10,6 +10,15 @@
   "monorepo": true,
   "root": "apps/gateway",
   "projects": {
+    "cached": {
+      "type": "library",
+      "root": "libs/cached",
+      "entryFile": "index",
+      "sourceRoot": "libs/cached/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/cached/tsconfig.lib.json"
+      }
+    },
     "common": {
       "type": "library",
       "root": "libs/common",

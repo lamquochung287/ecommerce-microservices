@@ -8,15 +8,25 @@ describe('UserController', () => {
 	beforeEach(async () => {
 		const app: TestingModule = await Test.createTestingModule({
 			controllers: [UserController],
-			providers: [UserService],
+			providers: [
+				{
+					provide: UserService,
+					useValue: {
+						register: jest.fn(),
+						login: jest.fn(),
+						logout: jest.fn(),
+						getProfile: jest.fn(),
+					},
+				},
+			],
 		}).compile();
 
 		userController = app.get<UserController>(UserController);
 	});
 
-	describe('root', () => {
-		it('should return "Hello World!"', () => {
-			expect(userController.getHello()).toBe('Hello World!');
+	describe('defined', () => {
+		it('should be defined', () => {
+			expect(userController).toBeDefined();
 		});
 	});
 });

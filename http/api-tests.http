@@ -1,0 +1,159 @@
+# =========================================================================
+# Ecommerce Microservices - API Test Requests
+# Used with VS Code "REST Client" extension
+# =========================================================================
+
+@baseUrl = http://localhost:3000
+@productServiceUrl = http://localhost:3003
+@orderServiceUrl = http://localhost:3002
+
+###
+# @name HelloGateway
+# 1. Gateway Health Check (calls User TCP service to get Hello User)
+# NOTE: Check response headers for "x-request-id" (Correlation ID)
+GET {{baseUrl}}/
+Accept: application/json
+
+
+# =========================================================================
+# Idempotency & Correlation ID Tracing Tests
+# =========================================================================
+
+###
+# @name RegisterUserWithIdempotency
+# 2. Register user WITH an Idempotency Key
+# FIRST CALL: Should process normally and save response to Redis (TTL 24h).
+# SECOND CALL (same key): Should instantly return the identical cached response.
+# CONCURRENT CALLS: Running this concurrently in parallel will return a 409 Conflict.
+POST {{baseUrl}}/user/register
+Content-Type: application/json
+x-idempotency-key: idempotency-test-key-999
+
+{
+  "email": "idempotent.user@example.com",
+  "password": "securePassword123",
+  "fullName": "Idempotent User"
+}
+
+
+###
+# @name LoginWithIdempotency
+# 3. Login user WITH an Idempotency Key
+# FIRST CALL: Processes login, generates tokens, saves result to Redis.
+# SECOND CALL (same key): Instantly returns the cached tokens from Redis without querying DB.
+POST {{baseUrl}}/user/login
+Content-Type: application/json
+x-idempotency-key: login-idempotency-key-888
+
+{
+  "email": "idempotent.user@example.com",
+  "password": "securePassword123"
+}
+
+
+# =========================================================================
+# User Service (Gateway Routing)
+# =========================================================================
+
+###
+# @name RegisterUser
+# 4. Register new user (WITHOUT idempotency key)
+POST {{baseUrl}}/user/register
+Content-Type: application/json
+
+{
+  "email": "testuser@example.com",
+  "password": "securePassword123",
+  "fullName": "Test User"
+}
+
+
+###
+# @name LoginUser
+# 5. Login user (WITHOUT idempotency key)
+POST {{baseUrl}}/user/login
+Content-Type: application/json
+
+{
+  "email": "testuser@example.com",
+  "password": "securePassword123"
+}
+
+### Capture JWT Token from Login Response
+@accessToken = {{LoginUser.response.body.accessToken}}
+@refreshToken = {{LoginUser.response.body.refreshToken}}
+@sessionId = {{LoginUser.response.body.sessionId}}
+@userId = {{LoginUser.response.body.user.id}}
+
+
+###
+# @name GetUserProfile
+# 6. Get User Profile (using param userId)
+# NOTE: Check response headers for automatic "x-request-id" generation.
+GET {{baseUrl}}/user/profile/{{userId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+
+###
+# @name GetAllUsers
+# 7. Get All Users List
+GET {{baseUrl}}/user
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+
+###
+# @name FindIdByUserId
+# 8. Find internal database ID by uuid userId
+GET {{baseUrl}}/user/id/{{userId}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+
+###
+# @name LogoutUser
+# 9. Logout (removes refresh token from Redis cache)
+POST {{baseUrl}}/user/logout
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "userId": "{{userId}}",
+  "sessionId": "{{sessionId}}"
+}
+
+
+# =========================================================================
+# Product Service
+# =========================================================================
+
+###
+# @name GetHelloProductDirect
+# 10. Check Product Service Directly (via HTTP port 3003)
+GET {{productServiceUrl}}/
+Accept: application/json
+
+###
+# @name GetHelloProductViaGateway
+# 11. Check Product Service via Gateway (routing to Product service)
+GET {{baseUrl}}/products
+Accept: application/json
+
+
+# =========================================================================
+# Order Service
+# =========================================================================
+
+###
+# @name GetHelloOrdersDirect
+# 12. Check Orders Service Directly (via HTTP port 3002)
+GET {{orderServiceUrl}}/
+Accept: application/json
+
+###
+# @name GetHelloOrdersViaGateway
+# 13. Check Orders Service via Gateway (routing to Orders service)
+GET {{baseUrl}}/orders
+Accept: application/json
+

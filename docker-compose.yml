@@ -17,3 +17,8 @@ services:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: password
       POSTGRES_DB: ecommerce
+
+  redis:
+    image: redis:alpine
+    ports:
+      - '6379:6379'
