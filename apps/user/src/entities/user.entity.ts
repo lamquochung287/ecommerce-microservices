@@ -28,6 +28,9 @@ export class User {
 	@Column({ nullable: true })
 	fullName: string;
 
+	@Column({ type: 'bigint', default: 0 })
+	permissions: number;
+
 	@Column({ default: true })
 	isActive: boolean;
 

@@ -118,6 +118,44 @@ export class UserService {
 		return { success: true, message: `Logged out successfully ${userId}` };
 	}
 
+	async verifyToken(token: string): Promise<any> {
+		try {
+			const accessTokenSecret =
+				this.configService.get<string>('JWT_ACCESS_SECRET') || 'access_secret';
+			const payload = await this.jwtService.verifyAsync(token, {
+				secret: accessTokenSecret,
+			});
+
+			// Check if session exists in Redis to ensure it hasn't been revoked
+			const refreshToken = await this.cachedService.get(
+				`refresh_token:${payload.sub}:${payload.sessionId}`,
+			);
+
+			if (!refreshToken) {
+				throw new UnauthorizedException('Session revoked or expired');
+			}
+
+			// Get latest user info and permissions
+			const user = await this.userRepository.findOne({
+				where: { userId: payload.sub }
+			});
+
+			if (!user || !user.isActive) {
+				throw new UnauthorizedException('User not found or inactive');
+			}
+
+			return {
+				userId: user.userId,
+				email: user.email,
+				fullName: user.fullName,
+				permissions: Number(user.permissions),
+				sessionId: payload.sessionId,
+			};
+		} catch (error) {
+			throw new UnauthorizedException('Invalid or expired token');
+		}
+	}
+
 	async getProfile(userId: string): Promise<User> {
 		const user = await this.userRepository.findOne({
 			where: { userId: userId },

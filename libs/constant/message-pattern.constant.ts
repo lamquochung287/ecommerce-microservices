@@ -3,6 +3,7 @@ export const USER_MESSAGE_PATTERN = {
     LOGOUT_USER: 'logout_user',
     REGISTER_USER: 'register_user',
     LOGIN_USER: 'login_user',
+    VERIFY_TOKEN: 'verify_token',
 };
 
 export const PRODUCT_MESSAGE_PATTERN = {

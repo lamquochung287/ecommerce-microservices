@@ -25,6 +25,11 @@ export class UserController {
 		return await this.userService.logout(data.userId, data.sessionId);
 	}
 
+	@MessagePattern({ cmd: USER_MESSAGE_PATTERN.VERIFY_TOKEN })
+	async verifyToken(token: string): Promise<any> {
+		return await this.userService.verifyToken(token);
+	}
+
 	@MessagePattern({ cmd: CMD.GET_USER_INFO })
 	async getProfile(userId: string): Promise<any> {
 		return await this.userService.getProfile(userId);
