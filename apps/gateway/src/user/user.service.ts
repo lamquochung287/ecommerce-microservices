@@ -36,19 +36,28 @@ export class UserService {
     }
   }
 
-  logout(userId: string, sessionId: string) {
-    // Logic will be implemented here
+  async logout(userId: string, sessionId: string) {
+    try {
+      this.logger.log(`User logout attempt: ${userId}`)
+      return await firstValueFrom(
+        this.userClient.send({ cmd: USER_MESSAGE_PATTERN.LOGOUT_USER },
+          { userId, sessionId }).pipe(timeout(10000),
+            catchError((error) => throwError(() => error))
+          ))
+    } catch (error) {
+      MicroserviceErrorHandler.handleError(error, 'logout user', 'User services')
+    }
   }
 
   getProfile(userId: string) {
     // Logic will be implemented here
   }
 
-  getAllUsers() {
-    // Logic will be implemented here
-  }
+  // getAllUsers() {
+  //   // Logic will be implemented here
+  // }
 
-  findIdByUserId(userId: string) {
-    // Logic will be implemented here
-  }
+  // findIdByUserId(userId: string) {
+  //   // Logic will be implemented here
+  // }
 }

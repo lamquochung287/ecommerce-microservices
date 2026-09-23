@@ -53,6 +53,10 @@ export class EnvironmentVariables {
   @IsNotEmpty()
   @IsString()
   JWT_REFRESH_EXPIRATION: string;
+
+  @IsNotEmpty()
+  @IsString()
+  API_KEY: string;
 }
 
 export function validateEnv(config: Record<string, any>) {

@@ -1,3 +1,6 @@
+import { setupTracing } from '@lib/common/tracing/tracing';
+setupTracing('user-service');
+
 import { NestFactory } from '@nestjs/core';
 import { UserModule } from './user.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';

@@ -87,14 +87,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
 
 		// Format and send the error response
 		const errorResponse = {
-			statusCode: status,
-			status: 'error',
+			success: false,
+			data: null,
 			error: error,
 			message: Array.isArray(message) ? message.join(', ') : message,
-			data: null,
-			timestamp: new Date().toISOString(),
-			path: request.url,
-			method: request.method,
+			meta: {
+				statusCode: status,
+				timestamp: new Date().toISOString(),
+				path: request.url,
+				method: request.method,
+				requestId: request.headers['x-request-id'] || null,
+			},
 		};
 
 		// Log the error response
@@ -121,14 +124,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
 			);
 			// Fallback response
 			response.status(500).json({
-				statusCode: 500,
-				status: 'error',
+				success: false,
+				data: null,
 				error: 'ResponseError',
 				message: 'Failed to process error response',
-				data: null,
-				timestamp: new Date().toISOString(),
-				path: request.url,
-				method: request.method,
+				meta: {
+					statusCode: 500,
+					timestamp: new Date().toISOString(),
+					path: request.url,
+					method: request.method,
+					requestId: request.headers['x-request-id'] || null,
+				},
 			});
 		}
 	}

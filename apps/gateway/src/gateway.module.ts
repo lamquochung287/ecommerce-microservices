@@ -5,10 +5,16 @@ import { ClientsModule, Transport } from '@nestjs/microservices';
 import { NAME_SERVICE_TCP, PORT_TCP } from 'libs/constant/port-tcp.constant';
 import { UserModule } from './user/user.module';
 import { CachedModule } from '@lib/cached';
-import { APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { IdempotencyInterceptor } from './common/interceptor/idempotency.interceptor';
 import { RequestTrackerMiddleware } from './common/middleware/request-tracker.middleware';
+import { TransformInterceptor } from './common/interceptor/transform.interceptor';
 import { CommonConfigModule } from '@lib/common';
+import { ProductModule } from './product/product.module';
+import { OrdersModule } from './orders/orders.module';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
+import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
+import { ConfigService } from '@nestjs/config';
 
 @Module({
 	imports: [
@@ -29,18 +35,28 @@ import { CommonConfigModule } from '@lib/common';
 					port: PORT_TCP.ORDER_TCP_PORT,
 				},
 			},
-			{
-				name: NAME_SERVICE_TCP.PRODUCT_SERVICE,
-				transport: Transport.TCP,
-				options: {
-					host: 'localhost',
-					port: PORT_TCP.PRODUCT_TCP_PORT,
-				},
-			},
 		]),
 		CommonConfigModule,
 		CachedModule,
 		UserModule,
+		ProductModule,
+		OrdersModule,
+		ThrottlerModule.forRootAsync({
+			inject: [ConfigService],
+			useFactory: (configService: ConfigService) => ({
+				throttlers: [
+					{
+						ttl: 60000,
+						limit: 30,
+					},
+				],
+				storage: new ThrottlerStorageRedisService({
+					host: configService.get<string>('REDIS_HOST') || 'localhost',
+					port: configService.get<number>('REDIS_PORT') || 6379,
+					password: configService.get<string>('REDIS_PASSWORD'),
+				}),
+			}),
+		}),
 	],
 
 	controllers: [GatewayController],
@@ -49,6 +65,14 @@ import { CommonConfigModule } from '@lib/common';
 		{
 			provide: APP_INTERCEPTOR,
 			useClass: IdempotencyInterceptor,
+		},
+		{
+			provide: APP_INTERCEPTOR,
+			useClass: TransformInterceptor,
+		},
+		{
+			provide: APP_GUARD,
+			useClass: ThrottlerGuard,
 		},
 	],
 	exports: [ClientsModule],

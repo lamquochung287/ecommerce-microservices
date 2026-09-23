@@ -1,0 +1,4 @@
+- Refresh token rotation: Later
+- Product: must do
+- Order: must do consider how to user another db for it 
+- Monitoring - Observability - Logstash + ES + Kibana

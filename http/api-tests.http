@@ -73,6 +73,7 @@ Content-Type: application/json
 # 5. Login user (WITHOUT idempotency key)
 POST {{baseUrl}}/user/login
 Content-Type: application/json
+x-api-key: adfsdfbzvb_fdaf342
 
 {
   "email": "testuser@example.com",

@@ -35,6 +35,7 @@ Dự án tuân theo chuẩn NestJS Monorepo, chia làm `apps` (các ứng dụng
 - **ORM**: TypeORM.
 - **Caching & In-memory Store**: Redis.
 - **Authentication**: JWT (Access Token, Refresh Token), bcrypt (hashing).
+- **Design Pattern**: CQRS (Command Query Responsibility Segregation) sử dụng `@nestjs/cqrs` cho các services phức tạp.
 
 ## 4. Quy tắc Lập trình (Coding Standards & Rules)
 
@@ -66,6 +67,12 @@ Khi viết code hoặc chỉnh sửa dự án, AI Agents **bắt buộc** phải
 
 - **KHÔNG ĐƯỢC tự ý quyết định hoặc đoán mò** khi yêu cầu chưa rõ ràng hoặc thiếu thông tin.
 - **BẮT BUỘC phải hỏi lại người dùng** để làm rõ các yêu cầu về nghiệp vụ, logic, cấu trúc hoặc các thay đổi lớn ảnh hưởng tới hệ thống trước khi tiến hành code.
+
+### 4.6. Áp dụng CQRS Pattern
+
+- Các microservices có nghiệp vụ phức tạp (như `product`, `orders`...) bắt buộc phải sử dụng thư viện `@nestjs/cqrs`.
+- Cấu trúc thư mục mã nguồn phải tuân thủ việc phân chia rõ ràng: `commands/` (thao tác thay đổi state/dữ liệu), `queries/` (thao tác đọc state/dữ liệu) và `events/`.
+- Mỗi Command/Query phải có một Handler (xử lý logic) tương ứng đi kèm (thường đặt trong thư mục `handlers/`).
 
 ---
 

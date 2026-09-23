@@ -6,14 +6,15 @@ import {
 	UpdateDateColumn,
 	Generated,
 	Index,
+	Unique,
 } from 'typeorm';
 
 @Entity('users')
 export class User {
 	@PrimaryGeneratedColumn()
+	@Index()
 	id: number;
 
-	@Index()
 	@Column()
 	@Generated('uuid')
 	userId: string;
