@@ -29,7 +29,7 @@ import { ConfigService } from '@nestjs/config';
 				throttlers: [
 					{
 						ttl: 60000,
-						limit: 30,
+						limit: 100000,
 					},
 				],
 				storage: new ThrottlerStorageRedisService({

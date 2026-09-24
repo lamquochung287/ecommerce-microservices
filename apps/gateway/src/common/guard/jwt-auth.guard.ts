@@ -1,9 +1,7 @@
-import { CanActivate, ExecutionContext, UnauthorizedException, Inject, Injectable } from "@nestjs/common";
+import { CanActivate, ExecutionContext, UnauthorizedException, GatewayTimeoutException, Inject, Injectable } from "@nestjs/common";
 import { ClientProxy } from "@nestjs/microservices";
 import { Request } from "express";
-import { firstValueFrom, timeout, catchError } from "rxjs";
-import { throwError } from "rxjs";
-import { GatewayTimeoutException } from "@nestjs/common";
+import { firstValueFrom, timeout, catchError, throwError } from "rxjs";
 import { NAME_SERVICE_TCP } from "libs/constant/port-tcp.constant";
 import { USER_MESSAGE_PATTERN } from "libs/constant/message-pattern.constant";
 

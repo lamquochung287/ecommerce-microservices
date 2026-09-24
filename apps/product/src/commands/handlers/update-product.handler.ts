@@ -23,14 +23,13 @@ export class UpdateProductHandler implements ICommandHandler<UpdateProductComman
 
 		if (dto.categoryId !== undefined) {
 			if (dto.categoryId === null) {
-				product.category = null;
-			} else {
-				const category = await this.categoryRepository.findOne({ where: { id: dto.categoryId } });
-				if (!category) {
-					throw new RpcException({ statusCode: 404, message: 'Category not found' });
-				}
-				product.category = category;
+				throw new RpcException({ statusCode: 400, message: 'categoryId không được để trống' });
 			}
+			const category = await this.categoryRepository.findOne({ where: { id: dto.categoryId } });
+			if (!category) {
+				throw new RpcException({ statusCode: 404, message: 'Category not found' });
+			}
+			product.category = category;
 		}
 
 		Object.assign(product, dto);

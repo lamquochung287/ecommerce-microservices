@@ -31,7 +31,7 @@ describe('ProductController', () => {
 
 	describe('getProducts', () => {
 		it('should return an array of products', async () => {
-			const result = await productController.getProducts();
+			const result = await productController.getProducts({});
 			expect(result).toEqual([{ id: 1, name: 'Product 1', price: 100 }]);
 			expect(queryBus.execute).toHaveBeenCalled();
 		});

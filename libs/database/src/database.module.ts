@@ -24,6 +24,14 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 				// Tự động tạo/cập nhật bảng trong DB dựa trên Entity (Chỉ nên set true khi làm dev)
 				synchronize: true,
+
+				// Connection pool: mặc định của driver pg quá nhỏ (10) cho tải đồng thời cao
+				extra: {
+					max: configService.get<number>('DB_POOL_MAX', 50),
+					min: configService.get<number>('DB_POOL_MIN', 5),
+					idleTimeoutMillis: 30000,
+					connectionTimeoutMillis: 5000,
+				},
 			}),
 		}),
 	],
