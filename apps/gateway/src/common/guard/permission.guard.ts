@@ -12,7 +12,7 @@ export class PermissionGuard implements CanActivate {
 			context.getClass(),
 		]);
 		
-		if (!requiredPermission) {
+		if (requiredPermission === undefined || requiredPermission === null) {
 			return true; // No permission required
 		}
 

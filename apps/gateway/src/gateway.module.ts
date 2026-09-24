@@ -1,9 +1,8 @@
 import { Module, NestModule, MiddlewareConsumer } from '@nestjs/common';
 import { GatewayController } from './gateway.controller';
 import { GatewayService } from './gateway.service';
-import { ClientsModule, Transport } from '@nestjs/microservices';
-import { NAME_SERVICE_TCP, PORT_TCP } from 'libs/constant/port-tcp.constant';
 import { UserModule } from './user/user.module';
+import { SharedClientsModule } from './shared-clients.module';
 import { CachedModule } from '@lib/cached';
 import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { IdempotencyInterceptor } from './common/interceptor/idempotency.interceptor';
@@ -18,24 +17,7 @@ import { ConfigService } from '@nestjs/config';
 
 @Module({
 	imports: [
-		ClientsModule.register([
-			{
-				name: NAME_SERVICE_TCP.USER_SERVICE,
-				transport: Transport.TCP,
-				options: {
-					host: 'localhost',
-					port: PORT_TCP.USER_TCP_PORT,
-				},
-			},
-			{
-				name: NAME_SERVICE_TCP.ORDER_SERVICE,
-				transport: Transport.TCP,
-				options: {
-					host: 'localhost',
-					port: PORT_TCP.ORDER_TCP_PORT,
-				},
-			},
-		]),
+		SharedClientsModule,
 		CommonConfigModule,
 		CachedModule,
 		UserModule,
@@ -75,7 +57,7 @@ import { ConfigService } from '@nestjs/config';
 			useClass: ThrottlerGuard,
 		},
 	],
-	exports: [ClientsModule],
+	exports: [],
 })
 
 export class GatewayModule implements NestModule {

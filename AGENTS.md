@@ -6,8 +6,8 @@
 
 - **Mô hình**: NestJS Monorepo Microservices.
 - **Giao thức Giao tiếp (Communication)**:
-  - Hiện tại: Giao tiếp nội bộ giữa các microservices được thực hiện qua **TCP** (sử dụng `@nestjs/microservices`).
-  - Tương lai: Dự kiến sẽ tích hợp **RabbitMQ** (đã cài đặt `amqp-connection-manager`, `amqplib` nhưng chưa cấu hình).
+  - Giao tiếp nội bộ giữa các microservices được thực hiện qua **TCP** (sử dụng `@nestjs/microservices`).
+  - Hệ thống **KHÔNG CÒN DÙNG RabbitMQ**, toàn bộ giao tiếp dựa vào TCP transport.
 - **API Gateway**: Entry point duy nhất để clients gọi tới. Gateway nhận HTTP request (RESTful) và phân phối xuống các microservices qua TCP.
 
 ## 2. Cấu trúc Thư mục (Directory Structure)
@@ -16,10 +16,12 @@ Dự án tuân theo chuẩn NestJS Monorepo, chia làm `apps` (các ứng dụng
 
 ### Apps
 
-- **`apps/gateway`**: Nhận các request HTTP từ bên ngoài. Sử dụng `HttpExceptionFilter` để xử lý lỗi trả về client.
-- **`apps/user`**: Microservice phụ trách User và Authentication. Chứa logic đăng ký, đăng nhập, sinh JWT và băm mật khẩu (bcrypt).
-- **`apps/product`**: Microservice quản lý dữ liệu Sản phẩm (Product).
-- **`apps/orders`**: Microservice quản lý dữ liệu Đơn hàng (Orders).
+*Ghi chú: Xem chi tiết hướng dẫn lập trình cho từng module tại file `AGENTS_GUIDE.md` bên trong thư mục của module tương ứng.*
+
+- **`apps/gateway`**: Nhận các request HTTP từ bên ngoài. Xem chi tiết tại [apps/gateway/AGENTS_GUIDE.md](./apps/gateway/AGENTS_GUIDE.md).
+- **`apps/user`**: Microservice phụ trách User và Authentication. Xem chi tiết tại [apps/user/AGENTS_GUIDE.md](./apps/user/AGENTS_GUIDE.md).
+- **`apps/product`**: Microservice quản lý dữ liệu Sản phẩm. Xem chi tiết tại [apps/product/AGENTS_GUIDE.md](./apps/product/AGENTS_GUIDE.md).
+- **`apps/orders`**: Microservice quản lý dữ liệu Đơn hàng. Xem chi tiết tại [apps/orders/AGENTS_GUIDE.md](./apps/orders/AGENTS_GUIDE.md).
 
 ### Libs (Shared Libraries)
 
@@ -76,4 +78,4 @@ Khi viết code hoặc chỉnh sửa dự án, AI Agents **bắt buộc** phải
 
 ---
 
-_Ghi chú: Cập nhật file này nếu có thêm libs, apps mới, hoặc khi triển khai chính thức RabbitMQ thay thế/bổ sung cho TCP._
+_Ghi chú: Cập nhật file này nếu có thêm libs, apps mới. Các quy tắc chi tiết của từng app nên được viết trong `AGENTS_GUIDE.md` của app đó._

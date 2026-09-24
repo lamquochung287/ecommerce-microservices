@@ -19,8 +19,7 @@ export class CreateProductDto {
   stock: number;
 
   @IsUUID()
-  @IsOptional()
-  categoryId?: string;
+  categoryId: string;
 }
 
 export class UpdateProductDto {

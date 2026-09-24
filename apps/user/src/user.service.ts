@@ -75,7 +75,7 @@ export class UserService {
 		return {
 			...tokens,
 			user: {
-				id: user.id,
+				id: user.userId,
 				email: user.email,
 				fullName: user.fullName,
 			},

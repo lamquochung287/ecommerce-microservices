@@ -1,3 +1,6 @@
 export class GetProductsQuery {
-	// Add pagination, filtering parameters here in the future
+	constructor(
+		public readonly page: number = 1,
+		public readonly limit: number = 20,
+	) {}
 }

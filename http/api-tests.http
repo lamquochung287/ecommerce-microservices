@@ -4,8 +4,7 @@
 # =========================================================================
 
 @baseUrl = http://localhost:3000
-@productServiceUrl = http://localhost:3003
-@orderServiceUrl = http://localhost:3002
+@apiKey = adfsdfbzvb_fdaf342
 
 ###
 # @name HelloGateway
@@ -13,6 +12,7 @@
 # NOTE: Check response headers for "x-request-id" (Correlation ID)
 GET {{baseUrl}}/
 Accept: application/json
+x-api-key: {{apiKey}}
 
 
 # =========================================================================
@@ -27,6 +27,7 @@ Accept: application/json
 # CONCURRENT CALLS: Running this concurrently in parallel will return a 409 Conflict.
 POST {{baseUrl}}/user/register
 Content-Type: application/json
+x-api-key: {{apiKey}}
 x-idempotency-key: idempotency-test-key-999
 
 {
@@ -43,6 +44,7 @@ x-idempotency-key: idempotency-test-key-999
 # SECOND CALL (same key): Instantly returns the cached tokens from Redis without querying DB.
 POST {{baseUrl}}/user/login
 Content-Type: application/json
+x-api-key: {{apiKey}}
 x-idempotency-key: login-idempotency-key-888
 
 {
@@ -60,6 +62,7 @@ x-idempotency-key: login-idempotency-key-888
 # 4. Register new user (WITHOUT idempotency key)
 POST {{baseUrl}}/user/register
 Content-Type: application/json
+x-api-key: {{apiKey}}
 
 {
   "email": "testuser@example.com",
@@ -73,7 +76,7 @@ Content-Type: application/json
 # 5. Login user (WITHOUT idempotency key)
 POST {{baseUrl}}/user/login
 Content-Type: application/json
-x-api-key: adfsdfbzvb_fdaf342
+x-api-key: {{apiKey}}
 
 {
   "email": "testuser@example.com",
@@ -81,10 +84,10 @@ x-api-key: adfsdfbzvb_fdaf342
 }
 
 ### Capture JWT Token from Login Response
-@accessToken = {{LoginUser.response.body.accessToken}}
-@refreshToken = {{LoginUser.response.body.refreshToken}}
-@sessionId = {{LoginUser.response.body.sessionId}}
-@userId = {{LoginUser.response.body.user.id}}
+@accessToken = {{LoginUser.response.body.$.data.accessToken}}
+@refreshToken = {{LoginUser.response.body.$.data.refreshToken}}
+@sessionId = {{LoginUser.response.body.$.data.sessionId}}
+@userId = {{LoginUser.response.body.$.data.user.id}}
 
 
 ###
@@ -92,6 +95,7 @@ x-api-key: adfsdfbzvb_fdaf342
 # 6. Get User Profile (using param userId)
 # NOTE: Check response headers for automatic "x-request-id" generation.
 GET {{baseUrl}}/user/profile/{{userId}}
+x-api-key: {{apiKey}}
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
@@ -100,6 +104,7 @@ Accept: application/json
 # @name GetAllUsers
 # 7. Get All Users List
 GET {{baseUrl}}/user
+x-api-key: {{apiKey}}
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
@@ -108,6 +113,7 @@ Accept: application/json
 # @name FindIdByUserId
 # 8. Find internal database ID by uuid userId
 GET {{baseUrl}}/user/id/{{userId}}
+x-api-key: {{apiKey}}
 Authorization: Bearer {{accessToken}}
 Accept: application/json
 
@@ -116,6 +122,7 @@ Accept: application/json
 # @name LogoutUser
 # 9. Logout (removes refresh token from Redis cache)
 POST {{baseUrl}}/user/logout
+x-api-key: {{apiKey}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -130,15 +137,62 @@ Content-Type: application/json
 # =========================================================================
 
 ###
-# @name GetHelloProductDirect
-# 10. Check Product Service Directly (via HTTP port 3003)
-GET {{productServiceUrl}}/
+# @name GetAllProducts
+# 10. Get all products
+GET {{baseUrl}}/products
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 ###
-# @name GetHelloProductViaGateway
-# 11. Check Product Service via Gateway (routing to Product service)
-GET {{baseUrl}}/products
+# @name CreateProduct
+# 11. Create a new product
+# NOTE: categoryId is REQUIRED. You must insert a Category UUID that exists in your database.
+# Otherwise, it will throw a 404 Category Not Found error.
+POST {{baseUrl}}/products
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Test Product",
+  "slug": "test-product",
+  "description": "This is a product created via API test",
+  "price": 199.99,
+  "stock": 50,
+  "categoryId": "00000000-0000-0000-0000-000000000000"
+}
+
+### Capture Product ID
+@productId = {{CreateProduct.response.body.data.id}}
+
+###
+# @name GetProductById
+# 12. Get product by ID
+GET {{baseUrl}}/products/{{productId}}
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+Accept: application/json
+
+###
+# @name UpdateProduct
+# 13. Update a product
+PUT {{baseUrl}}/products/{{productId}}
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Test Product Updated",
+  "price": 150.00
+}
+
+###
+# @name DeleteProduct
+# 14. Delete a product
+DELETE {{baseUrl}}/products/{{productId}}
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
 
 
@@ -147,14 +201,9 @@ Accept: application/json
 # =========================================================================
 
 ###
-# @name GetHelloOrdersDirect
-# 12. Check Orders Service Directly (via HTTP port 3002)
-GET {{orderServiceUrl}}/
-Accept: application/json
-
-###
 # @name GetHelloOrdersViaGateway
-# 13. Check Orders Service via Gateway (routing to Orders service)
+# 15. Check Orders Service via Gateway (routing to Orders service)
 GET {{baseUrl}}/orders
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
 Accept: application/json
-

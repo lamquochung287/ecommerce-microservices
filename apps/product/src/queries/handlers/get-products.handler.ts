@@ -11,6 +11,24 @@ export class GetProductsHandler implements IQueryHandler<GetProductsQuery> {
 	) {}
 
 	async execute(query: GetProductsQuery) {
-		return await this.productRepository.find({ relations: ['category'] });
+		const { page, limit } = query;
+		const skip = (page - 1) * limit;
+
+		const [data, total] = await this.productRepository.findAndCount({
+			relations: ['category'],
+			skip,
+			take: limit,
+			order: { createdAt: 'DESC' }, // Thêm order để phân trang chuẩn
+		});
+
+		return {
+			data,
+			meta: {
+				total,
+				page,
+				limit,
+				totalPages: Math.ceil(total / limit),
+			}
+		};
 	}
 }

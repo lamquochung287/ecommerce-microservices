@@ -21,9 +21,9 @@ export class ProductService {
     }
   }
 
-  async getProducts() {
+  async getProducts(page: number = 1, limit: number = 20) {
     try {
-      return await firstValueFrom(this.productClient.send({ cmd: PRODUCT_MESSAGE_PATTERN.GET_PRODUCTS }, {}).pipe(
+      return await firstValueFrom(this.productClient.send({ cmd: PRODUCT_MESSAGE_PATTERN.GET_PRODUCTS }, { page, limit }).pipe(
         timeout(10000),
         catchError((error) => throwError(() => error))
       ));

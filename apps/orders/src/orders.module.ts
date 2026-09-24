@@ -10,12 +10,17 @@ import { OrderCreatedHandler } from './events/handlers/order-created.handler';
 import { Order } from './entities/order.entity';
 import { OrderItem } from './entities/order-item.entity';
 
+import { DatabaseModule } from '@lib/database';
+import { CommonConfigModule } from '@lib/common';
+
 export const CommandHandlers = [CreateOrderHandler, UpdateOrderStatusHandler];
 export const QueryHandlers = [GetOrdersHandler, GetOrderHandler];
 export const EventHandlers = [OrderCreatedHandler];
 
 @Module({
 	imports: [
+		CommonConfigModule,
+		DatabaseModule,
 		TypeOrmModule.forFeature([Order, OrderItem]),
 		CqrsModule,
 	],

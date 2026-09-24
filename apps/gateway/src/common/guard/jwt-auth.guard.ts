@@ -1,7 +1,9 @@
 import { CanActivate, ExecutionContext, UnauthorizedException, Inject, Injectable } from "@nestjs/common";
 import { ClientProxy } from "@nestjs/microservices";
 import { Request } from "express";
-import { firstValueFrom } from "rxjs";
+import { firstValueFrom, timeout, catchError } from "rxjs";
+import { throwError } from "rxjs";
+import { GatewayTimeoutException } from "@nestjs/common";
 import { NAME_SERVICE_TCP } from "libs/constant/port-tcp.constant";
 import { USER_MESSAGE_PATTERN } from "libs/constant/message-pattern.constant";
 
@@ -22,7 +24,10 @@ export class JwtAuthGuard implements CanActivate {
 
         try {
             const payload = await firstValueFrom(
-                this.userClient.send({ cmd: USER_MESSAGE_PATTERN.VERIFY_TOKEN }, token)
+                this.userClient.send({ cmd: USER_MESSAGE_PATTERN.VERIFY_TOKEN }, token).pipe(
+                    timeout(5000),
+                    catchError(err => throwError(() => err.name === 'TimeoutError' ? new GatewayTimeoutException('User service timeout') : err))
+                )
             );
             
             if (!payload || payload.status === 'error' || payload.error) {
@@ -31,6 +36,9 @@ export class JwtAuthGuard implements CanActivate {
             
             req['user'] = payload; // Attach user + permissions to the request
         } catch (error) {
+            if (error instanceof GatewayTimeoutException) {
+                throw error;
+            }
             throw new UnauthorizedException(error.message || 'Invalid or expired token');
         }
 

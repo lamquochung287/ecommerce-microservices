@@ -1,5 +1,5 @@
 import { setupTracing } from '@lib/common/tracing/tracing';
-setupTracing('gateway-service');
+setupTracing('gateway-service', 9464);
 
 import { NestFactory } from '@nestjs/core';
 import { GatewayModule } from './gateway.module';

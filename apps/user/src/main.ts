@@ -1,5 +1,5 @@
 import { setupTracing } from '@lib/common/tracing/tracing';
-setupTracing('user-service');
+setupTracing('user-service', 9465);
 
 import { NestFactory } from '@nestjs/core';
 import { UserModule } from './user.module';

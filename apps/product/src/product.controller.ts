@@ -22,8 +22,8 @@ export class ProductController {
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.GET_PRODUCTS })
-	async getProducts() {
-		return this.queryBus.execute(new GetProductsQuery());
+	async getProducts(@Payload() payload: { page?: number, limit?: number }) {
+		return this.queryBus.execute(new GetProductsQuery(payload?.page || 1, payload?.limit || 20));
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.GET_PRODUCT })

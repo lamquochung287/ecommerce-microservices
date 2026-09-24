@@ -17,13 +17,10 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
 
 	async execute(command: CreateProductCommand) {
 		const { dto } = command;
-		let category = null;
-
-		if (dto.categoryId) {
-			category = await this.categoryRepository.findOne({ where: { id: dto.categoryId } });
-			if (!category) {
-				throw new RpcException({ statusCode: 404, message: 'Category not found' });
-			}
+		
+		const category = await this.categoryRepository.findOne({ where: { id: dto.categoryId } });
+		if (!category) {
+			throw new RpcException({ statusCode: 404, message: 'Category not found' });
 		}
 
 		const product = this.productRepository.create({

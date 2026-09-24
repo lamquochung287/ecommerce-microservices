@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Query } from '@nestjs/common';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { PermissionGuard } from '../common/guard/permission.guard';
 import { RequirePermission } from '../common/decorator/require-permission.decorator';
@@ -19,8 +19,13 @@ export class ProductController {
 
   @Get()
   @RequirePermission(ModuleName.PRODUCT, Action.READ)
-  getProducts() {
-    return this.productService.getProducts();
+  getProducts(@Query('page') page?: string, @Query('limit') limit?: string) {
+    let pageNumber = page ? parseInt(page, 10) : 1;
+    let limitNumber = limit ? parseInt(limit, 10) : 20;
+    
+    if (isNaN(pageNumber) || pageNumber <= 0) pageNumber = 1;
+    if (isNaN(limitNumber) || limitNumber <= 0) limitNumber = 20;
+    return this.productService.getProducts(pageNumber, limitNumber);
   }
 
   @Get(':id')

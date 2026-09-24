@@ -11,6 +11,9 @@ import { ProductCreatedHandler } from './events/handlers/product-created.handler
 import { Product } from './entities/product.entity';
 import { Category } from './entities/category.entity';
 
+import { DatabaseModule } from '@lib/database';
+import { CommonConfigModule } from '@lib/common';
+
 export const CommandHandlers = [
 	CreateProductHandler,
 	UpdateProductHandler,
@@ -21,6 +24,8 @@ export const EventHandlers = [ProductCreatedHandler];
 
 @Module({
 	imports: [
+		CommonConfigModule,
+		DatabaseModule,
 		TypeOrmModule.forFeature([Product, Category]),
 		CqrsModule,
 	],
