@@ -1,4 +1,6 @@
-import { IsString, IsNumber, IsOptional, IsBoolean, Min, IsUUID } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsBoolean, Min, IsUUID, IsArray, IsIn } from 'class-validator';
+import { Type } from 'class-transformer';
+import { PaginationQueryDto } from '@lib/common';
 
 export class CreateProductDto {
   @IsString()
@@ -18,8 +20,22 @@ export class CreateProductDto {
   @Min(0)
   stock: number;
 
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  lowStockThreshold?: number;
+
   @IsUUID()
   categoryId: string;
+
+  @IsUUID()
+  @IsOptional()
+  brandId?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  images?: string[];
 }
 
 export class UpdateProductDto {
@@ -45,6 +61,11 @@ export class UpdateProductDto {
   @IsOptional()
   stock?: number;
 
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  lowStockThreshold?: number;
+
   @IsBoolean()
   @IsOptional()
   isActive?: boolean;
@@ -52,4 +73,48 @@ export class UpdateProductDto {
   @IsUUID()
   @IsOptional()
   categoryId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  brandId?: string;
+
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  images?: string[];
+}
+
+export class GetProductsFilterDto extends PaginationQueryDto {
+  @IsUUID()
+  @IsOptional()
+  categoryId?: string;
+
+  @IsUUID()
+  @IsOptional()
+  brandId?: string;
+
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0)
+  @IsOptional()
+  minPrice?: number;
+
+  @IsNumber()
+  @Type(() => Number)
+  @Min(0)
+  @IsOptional()
+  maxPrice?: number;
+
+  @IsBoolean()
+  @Type(() => Boolean)
+  @IsOptional()
+  isActive?: boolean;
+
+  @IsString()
+  @IsOptional()
+  search?: string;
+
+  @IsIn(['name', 'price', 'stock', 'createdAt'])
+  @IsOptional()
+  declare sortBy?: string;
 }

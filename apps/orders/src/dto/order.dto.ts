@@ -1,4 +1,4 @@
-import { IsString, IsNumber, IsEnum, IsUUID, IsArray, ValidateNested, Min } from 'class-validator';
+import { IsString, IsNumber, IsEnum, IsUUID, IsArray, ValidateNested, Min, IsOptional } from 'class-validator';
 import { Type } from 'class-transformer';
 import { OrderStatus } from '../entities/order.entity';
 
@@ -15,12 +15,42 @@ export class OrderItemDto {
   unitPrice: number;
 }
 
+export class ShippingAddressDto {
+  @IsString()
+  recipientName: string;
+
+  @IsString()
+  recipientPhone: string;
+
+  @IsString()
+  addressLine1: string;
+
+  @IsString()
+  @IsOptional()
+  addressLine2?: string;
+
+  @IsString()
+  city: string;
+
+  @IsString()
+  @IsOptional()
+  province?: string;
+
+  @IsString()
+  @IsOptional()
+  postalCode?: string;
+
+  @IsString()
+  country: string;
+}
+
 export class CreateOrderDto {
   @IsUUID()
   userId: string;
 
-  @IsString()
-  shippingAddress: string;
+  @ValidateNested()
+  @Type(() => ShippingAddressDto)
+  shippingAddress: ShippingAddressDto;
 
   @IsArray()
   @ValidateNested({ each: true })

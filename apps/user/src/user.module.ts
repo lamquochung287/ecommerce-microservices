@@ -8,6 +8,8 @@ import { User } from './entities/user.entity';
 import { CachedModule } from '@lib/cached';
 import { CommonConfigModule } from '@lib/common';
 import { HealthModule } from './health/health.module';
+import { AddressModule } from './address/address.module';
+import { RoleModule } from './role/role.module';
 
 @Module({
 	imports: [
@@ -17,10 +19,11 @@ import { HealthModule } from './health/health.module';
 		JwtModule.register({}),
 		CachedModule,
 		HealthModule,
+		AddressModule,
+		RoleModule,
 	],
 	controllers: [UserController],
 	providers: [UserService],
 
 })
 export class UserModule { }
-

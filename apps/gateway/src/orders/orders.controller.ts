@@ -34,4 +34,10 @@ export class OrdersController {
   updateOrderStatus(@Param('id') id: string, @Body() dto: UpdateOrderStatusDto) {
     return this.ordersService.updateOrderStatus(id, dto);
   }
+
+  @Get(':id/refunds')
+  @RequirePermission(ModuleName.ORDER, Action.READ)
+  getRefunds(@Param('id') id: string) {
+    return this.ordersService.getRefunds(id);
+  }
 }

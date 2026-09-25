@@ -14,6 +14,7 @@ import { User } from './entities/user.entity';
 import { LoginUserDTO } from './dto/login-user.dto';
 import { RegisterUserDTO } from './dto/register-user.dto';
 import { CachedService } from '@lib/cached';
+import { RoleService } from './role/role.service';
 
 @Injectable()
 export class UserService {
@@ -23,7 +24,15 @@ export class UserService {
 		private readonly jwtService: JwtService,
 		private readonly configService: ConfigService,
 		private readonly cachedService: CachedService,
+		private readonly roleService: RoleService,
 	) { }
+
+	// Permissions hiệu lực = OR bitmask tất cả role user đang có. Fallback về field User.permissions cũ
+	// nếu user chưa được gán role nào (giữ tương thích ngược, tránh user cũ mất quyền truy cập đột ngột).
+	private async resolvePermissions(user: User): Promise<number> {
+		const rolePermissions = await this.roleService.getEffectivePermissions(user.id);
+		return rolePermissions ?? Number(user.permissions);
+	}
 
 	async register(dto: RegisterUserDTO): Promise<User> {
 		const existingUser = await this.userRepository.findOne({
@@ -148,7 +157,7 @@ export class UserService {
 				userId: user.userId,
 				email: user.email,
 				fullName: user.fullName,
-				permissions: Number(user.permissions),
+				permissions: await this.resolvePermissions(user),
 				sessionId: payload.sessionId,
 			};
 		} catch (error) {

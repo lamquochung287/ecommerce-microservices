@@ -5,6 +5,7 @@ import { Order } from '../../entities/order.entity';
 import { Outbox } from '../../entities/outbox.entity';
 import { ORDER_EVENT_TYPE } from '../../events/order-event-type.constant';
 import { RpcException } from '@nestjs/microservices';
+import { canTransition } from '../../order-status.constant';
 
 @CommandHandler(UpdateOrderStatusCommand)
 export class UpdateOrderStatusHandler implements ICommandHandler<UpdateOrderStatusCommand> {
@@ -20,6 +21,12 @@ export class UpdateOrderStatusHandler implements ICommandHandler<UpdateOrderStat
 			}
 
 			const previousStatus = order.status;
+			if (!canTransition(previousStatus, dto.status)) {
+				throw new RpcException({
+					statusCode: 400,
+					message: `Không thể chuyển trạng thái từ ${previousStatus} sang ${dto.status}`,
+				});
+			}
 			order.status = dto.status;
 			const savedOrder = await manager.save(order);
 
