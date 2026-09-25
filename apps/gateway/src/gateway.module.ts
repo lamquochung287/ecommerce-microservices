@@ -11,6 +11,8 @@ import { TransformInterceptor } from './common/interceptor/transform.interceptor
 import { CommonConfigModule } from '@lib/common';
 import { ProductModule } from './product/product.module';
 import { OrdersModule } from './orders/orders.module';
+import { HealthModule } from './health/health.module';
+import { TcpResilienceModule } from './common/tcp-resilience.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { ConfigService } from '@nestjs/config';
@@ -20,9 +22,11 @@ import { ConfigService } from '@nestjs/config';
 		SharedClientsModule,
 		CommonConfigModule,
 		CachedModule,
+		TcpResilienceModule,
 		UserModule,
 		ProductModule,
 		OrdersModule,
+		HealthModule,
 		ThrottlerModule.forRootAsync({
 			inject: [ConfigService],
 			useFactory: (configService: ConfigService) => ({
@@ -64,6 +68,7 @@ export class GatewayModule implements NestModule {
 	configure(consumer: MiddlewareConsumer) {
 		consumer
 			.apply(RequestTrackerMiddleware)
+			.exclude('health')
 			.forRoutes('*');
 	}
 }

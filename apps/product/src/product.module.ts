@@ -13,6 +13,7 @@ import { Category } from './entities/category.entity';
 
 import { DatabaseModule } from '@lib/database';
 import { CommonConfigModule } from '@lib/common';
+import { HealthModule } from './health/health.module';
 
 export const CommandHandlers = [
 	CreateProductHandler,
@@ -28,6 +29,7 @@ export const EventHandlers = [ProductCreatedHandler];
 		DatabaseModule,
 		TypeOrmModule.forFeature([Product, Category]),
 		CqrsModule,
+		HealthModule,
 	],
 	controllers: [ProductController],
 	providers: [

@@ -26,6 +26,7 @@ async function bootstrap() {
 		}),
 	);
 	app.useGlobalFilters(new HttpExceptionFilter());
+	app.enableShutdownHooks();
 	const port = configService.get<number>('PORT', 3000);
 	await app.listen(port, () => {
 		console.log(`Gateway is running on port ${port}`);

@@ -7,6 +7,7 @@ import { UserService } from './user.service';
 import { User } from './entities/user.entity';
 import { CachedModule } from '@lib/cached';
 import { CommonConfigModule } from '@lib/common';
+import { HealthModule } from './health/health.module';
 
 @Module({
 	imports: [
@@ -15,6 +16,7 @@ import { CommonConfigModule } from '@lib/common';
 		TypeOrmModule.forFeature([User]),
 		JwtModule.register({}),
 		CachedModule,
+		HealthModule,
 	],
 	controllers: [UserController],
 	providers: [UserService],

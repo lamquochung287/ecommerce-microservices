@@ -20,3 +20,7 @@ export const ORDER_MESSAGE_PATTERN = {
     GET_ORDER: 'get_order',
     UPDATE_ORDER_STATUS: 'update_order_status',
 };
+
+export const HEALTH_MESSAGE_PATTERN = {
+    HEALTH_CHECK: 'health_check',
+};

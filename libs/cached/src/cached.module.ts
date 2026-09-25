@@ -1,12 +1,14 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { TerminusModule } from '@nestjs/terminus';
 import Redis from 'ioredis';
 import { CachedService } from './cached.service';
+import { RedisHealthIndicator } from './redis-health.indicator';
 import { REDIS_CLIENT } from './cached.constant';
 
 @Global()
 @Module({
-	imports: [ConfigModule],
+	imports: [ConfigModule, TerminusModule],
 	providers: [
 		{
 			provide: REDIS_CLIENT,
@@ -27,7 +29,8 @@ import { REDIS_CLIENT } from './cached.constant';
 			inject: [ConfigService],
 		},
 		CachedService,
+		RedisHealthIndicator,
 	],
-	exports: [CachedService, REDIS_CLIENT],
+	exports: [CachedService, REDIS_CLIENT, RedisHealthIndicator],
 })
 export class CachedModule {}

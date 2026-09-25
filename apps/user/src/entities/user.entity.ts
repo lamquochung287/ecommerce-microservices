@@ -4,6 +4,7 @@ import {
 	PrimaryGeneratedColumn,
 	CreateDateColumn,
 	UpdateDateColumn,
+	DeleteDateColumn,
 	Generated,
 	Index,
 	Unique,
@@ -39,4 +40,7 @@ export class User {
 
 	@UpdateDateColumn()
 	updatedAt: Date;
+
+	@DeleteDateColumn()
+	deletedAt: Date | null;
 }

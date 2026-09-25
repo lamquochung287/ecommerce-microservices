@@ -1,4 +1,4 @@
-# Dự án Ecommerce Microservices - Hướng dẫn cho AI Agents (AGENTS.md)
+# Dự án Ecommerce Microservices - Hướng dẫn cho AI Agents (CLAUDE.md)
 
 Đây là tài liệu cung cấp ngữ cảnh, cấu trúc và quy tắc ("bộ nhớ") cho AI Agents khi tham gia phát triển dự án này.
 
@@ -16,12 +16,12 @@ Dự án tuân theo chuẩn NestJS Monorepo, chia làm `apps` (các ứng dụng
 
 ### Apps
 
-*Ghi chú: Xem chi tiết hướng dẫn lập trình cho từng module tại file `AGENTS_GUIDE.md` bên trong thư mục của module tương ứng.*
+*Ghi chú: Xem chi tiết hướng dẫn lập trình cho từng module tại file `CLAUDE.md` bên trong thư mục của module tương ứng.*
 
-- **`apps/gateway`**: Nhận các request HTTP từ bên ngoài. Xem chi tiết tại [apps/gateway/AGENTS_GUIDE.md](./apps/gateway/AGENTS_GUIDE.md).
-- **`apps/user`**: Microservice phụ trách User và Authentication. Xem chi tiết tại [apps/user/AGENTS_GUIDE.md](./apps/user/AGENTS_GUIDE.md).
-- **`apps/product`**: Microservice quản lý dữ liệu Sản phẩm. Xem chi tiết tại [apps/product/AGENTS_GUIDE.md](./apps/product/AGENTS_GUIDE.md).
-- **`apps/orders`**: Microservice quản lý dữ liệu Đơn hàng. Xem chi tiết tại [apps/orders/AGENTS_GUIDE.md](./apps/orders/AGENTS_GUIDE.md).
+- **`apps/gateway`**: Nhận các request HTTP từ bên ngoài. Xem chi tiết tại [apps/gateway/CLAUDE.md](./apps/gateway/CLAUDE.md).
+- **`apps/user`**: Microservice phụ trách User và Authentication. Xem chi tiết tại [apps/user/CLAUDE.md](./apps/user/CLAUDE.md).
+- **`apps/product`**: Microservice quản lý dữ liệu Sản phẩm. Xem chi tiết tại [apps/product/CLAUDE.md](./apps/product/CLAUDE.md).
+- **`apps/orders`**: Microservice quản lý dữ liệu Đơn hàng. Xem chi tiết tại [apps/orders/CLAUDE.md](./apps/orders/CLAUDE.md).
 
 ### Libs (Shared Libraries)
 
@@ -78,4 +78,4 @@ Khi viết code hoặc chỉnh sửa dự án, AI Agents **bắt buộc** phải
 
 ---
 
-_Ghi chú: Cập nhật file này nếu có thêm libs, apps mới. Các quy tắc chi tiết của từng app nên được viết trong `AGENTS_GUIDE.md` của app đó._
+_Ghi chú: Cập nhật file này nếu có thêm libs, apps mới. Các quy tắc chi tiết của từng app nên được viết trong `CLAUDE.md` của app đó._

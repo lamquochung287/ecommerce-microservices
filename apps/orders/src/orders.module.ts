@@ -12,6 +12,8 @@ import { OrderItem } from './entities/order-item.entity';
 
 import { DatabaseModule } from '@lib/database';
 import { CommonConfigModule } from '@lib/common';
+import { HealthModule } from './health/health.module';
+import { OutboxModule } from './outbox/outbox.module';
 
 export const CommandHandlers = [CreateOrderHandler, UpdateOrderStatusHandler];
 export const QueryHandlers = [GetOrdersHandler, GetOrderHandler];
@@ -23,6 +25,8 @@ export const EventHandlers = [OrderCreatedHandler];
 		DatabaseModule,
 		TypeOrmModule.forFeature([Order, OrderItem]),
 		CqrsModule,
+		HealthModule,
+		OutboxModule,
 	],
 	controllers: [OrdersController],
 	providers: [...CommandHandlers, ...QueryHandlers, ...EventHandlers],

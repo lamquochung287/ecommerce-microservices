@@ -17,6 +17,7 @@ async function bootstrap() {
 			},
 		},
 	);
+	app.enableShutdownHooks();
 	await app.listen();
 	console.log(`Product microservice is running on port ${PORT_TCP.PRODUCT_TCP_PORT}`);
 }

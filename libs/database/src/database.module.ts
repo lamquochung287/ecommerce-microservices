@@ -22,8 +22,12 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 				// Tự động load các Entity mà bạn viết ở các Microservice
 				autoLoadEntities: true,
 
-				// Tự động tạo/cập nhật bảng trong DB dựa trên Entity (Chỉ nên set true khi làm dev)
-				synchronize: true,
+				// Đã chuyển sang TypeORM migration (xem libs/database/src/migrations) — không tự đổi schema nữa
+				synchronize: false,
+
+				// Migration tự chạy khi service khởi động, dùng chung file migrations cho mọi service
+				migrationsRun: true,
+				migrations: [__dirname + '/migrations/*{.ts,.js}'],
 
 				// Connection pool: mặc định của driver pg quá nhỏ (10) cho tải đồng thời cao
 				extra: {

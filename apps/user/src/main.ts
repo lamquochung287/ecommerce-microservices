@@ -27,6 +27,7 @@ async function bootstrap() {
 			transform: true,
 		}),
 	);
+	app.enableShutdownHooks();
 	await app.listen();
 	console.log(`User microservice is running on port ${PORT_TCP.USER_TCP_PORT}`);
 }
