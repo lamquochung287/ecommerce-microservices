@@ -4,6 +4,7 @@ export const USER_MESSAGE_PATTERN = {
     REGISTER_USER: 'register_user',
     LOGIN_USER: 'login_user',
     VERIFY_TOKEN: 'verify_token',
+    UPDATE_AVATAR: 'update_avatar',
 };
 
 export const PRODUCT_MESSAGE_PATTERN = {
@@ -65,4 +66,31 @@ export const ROLE_MESSAGE_PATTERN = {
     DELETE_ROLE: 'delete_role',
     ASSIGN_ROLE: 'assign_role',
     REMOVE_ROLE: 'remove_role',
+};
+
+export const PAYMENT_MESSAGE_PATTERN = {
+    CHARGE_PAYMENT: 'charge_payment',
+    HANDLE_WEBHOOK: 'handle_payment_webhook',
+    GET_TRANSACTION: 'get_transaction',
+};
+
+export const PAYMENT_EVENT_PATTERN = {
+    PAYMENT_SUCCEEDED: 'payment_succeeded',
+    PAYMENT_FAILED: 'payment_failed',
+};
+
+export const NOTIFICATION_MESSAGE_PATTERN = {
+    GET_SENT_NOTIFICATIONS: 'get_sent_notifications',
+};
+
+export const REVIEW_MESSAGE_PATTERN = {
+    CREATE_REVIEW: 'create_review',
+    GET_REVIEWS_BY_PRODUCT: 'get_reviews_by_product',
+};
+
+export const PROMOTION_MESSAGE_PATTERN = {
+    CREATE_VOUCHER: 'create_voucher',
+    GET_VOUCHERS: 'get_vouchers',
+    GET_AVAILABLE_VOUCHERS: 'get_available_vouchers',
+    APPLY_VOUCHER: 'apply_voucher',
 };

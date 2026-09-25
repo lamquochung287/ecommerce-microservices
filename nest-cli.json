@@ -37,6 +37,15 @@
         "tsConfigPath": "libs/database/tsconfig.lib.json"
       }
     },
+    "media": {
+      "type": "library",
+      "root": "libs/media",
+      "entryFile": "index",
+      "sourceRoot": "libs/media/src",
+      "compilerOptions": {
+        "tsConfigPath": "libs/media/tsconfig.lib.json"
+      }
+    },
     "gateway": {
       "type": "application",
       "root": "apps/gateway",
@@ -53,6 +62,42 @@
       "sourceRoot": "apps/orders/src",
       "compilerOptions": {
         "tsConfigPath": "apps/orders/tsconfig.app.json"
+      }
+    },
+    "payment": {
+      "type": "application",
+      "root": "apps/payment",
+      "entryFile": "main",
+      "sourceRoot": "apps/payment/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/payment/tsconfig.app.json"
+      }
+    },
+    "notification": {
+      "type": "application",
+      "root": "apps/notification",
+      "entryFile": "main",
+      "sourceRoot": "apps/notification/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/notification/tsconfig.app.json"
+      }
+    },
+    "review": {
+      "type": "application",
+      "root": "apps/review",
+      "entryFile": "main",
+      "sourceRoot": "apps/review/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/review/tsconfig.app.json"
+      }
+    },
+    "promotion": {
+      "type": "application",
+      "root": "apps/promotion",
+      "entryFile": "main",
+      "sourceRoot": "apps/promotion/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/promotion/tsconfig.app.json"
       }
     },
     "product": {

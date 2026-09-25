@@ -12,6 +12,9 @@ export enum ModuleName {
 	PRODUCT = 1 << 5,
 	ORDER = 1 << 6,
 	CAMPAIGN = 1 << 7,
+	PAYMENT = 1 << 8,
+	REVIEW = 1 << 9,
+	PROMOTION = 1 << 10,
 }
 
 // Example: ModuleName.PRODUCT | Action.READ

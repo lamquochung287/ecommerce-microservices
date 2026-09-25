@@ -29,6 +29,9 @@ export class User {
 	@Column({ nullable: true })
 	fullName: string;
 
+	@Column({ type: 'varchar', nullable: true })
+	avatarUrl: string | null;
+
 	@Column({ type: 'bigint', default: 0 })
 	permissions: number;
 

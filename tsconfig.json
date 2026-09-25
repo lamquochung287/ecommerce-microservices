@@ -35,6 +35,12 @@
       ],
       "@lib/database/*": [
         "libs/database/src/*"
+      ],
+      "@lib/media": [
+        "libs/media/src"
+      ],
+      "@lib/media/*": [
+        "libs/media/src/*"
       ]
     }
   }

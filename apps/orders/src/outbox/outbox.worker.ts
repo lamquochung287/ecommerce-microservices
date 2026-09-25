@@ -4,7 +4,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ClientProxy } from '@nestjs/microservices';
 import { Outbox, OutboxStatus } from '../entities/outbox.entity';
-import { ORDER_TCP_CLIENT } from './outbox.constant';
+import { ORDER_TCP_CLIENT, NOTIFICATION_TCP_CLIENT } from './outbox.constant';
 
 const MAX_RETRY = 5;
 const BATCH_SIZE = 20;
@@ -13,11 +13,17 @@ const BATCH_SIZE = 20;
 export class OutboxWorker {
 	private readonly logger = new Logger(OutboxWorker.name);
 	private isRunning = false;
+	private readonly subscribers: ClientProxy[];
 
 	constructor(
 		@InjectRepository(Outbox) private readonly outboxRepository: Repository<Outbox>,
 		@Inject(ORDER_TCP_CLIENT) private readonly client: ClientProxy,
-	) {}
+		@Inject(NOTIFICATION_TCP_CLIENT) private readonly notificationClient: ClientProxy,
+	) {
+		// TCP transport của NestJS là point-to-point (không broadcast) — mỗi subscriber cần emit riêng.
+		// Thêm subscriber mới (vd Review khi cần biết OrderDelivered) thì bổ sung ClientProxy vào đây.
+		this.subscribers = [this.client, this.notificationClient];
+	}
 
 	@Cron(CronExpression.EVERY_SECOND)
 	async processPendingEvents() {
@@ -46,7 +52,9 @@ export class OutboxWorker {
 
 	private async publishEvent(event: Outbox) {
 		try {
-			this.client.emit(event.eventType, event.payload);
+			for (const subscriber of this.subscribers) {
+				subscriber.emit(event.eventType, event.payload);
+			}
 
 			event.status = OutboxStatus.PUBLISHED;
 			event.publishedAt = new Date();

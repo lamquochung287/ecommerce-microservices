@@ -59,8 +59,9 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
 			return manager.save(newOrder);
 		});
 
-		// Step 2: Capture Payment (simulate — xem saga/simulated-payment.provider.ts).
-		const captureResult = await this.paymentProvider.capture(order.id, totalAmount);
+		// Step 2: Capture Payment qua apps/payment (Phase 2) — order.id dùng làm idempotency key vì
+		// đã unique và cố định cho suốt vòng đời order, an toàn để Payment service dedupe khi retry.
+		const captureResult = await this.paymentProvider.capture(order.id, totalAmount, order.id);
 
 		if (!captureResult.success) {
 			// Compensation: release inventory đã reserve, Order chuyển CANCELLED.

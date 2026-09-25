@@ -34,6 +34,7 @@ export class UpdateOrderStatusHandler implements ICommandHandler<UpdateOrderStat
 				eventType: ORDER_EVENT_TYPE.ORDER_STATUS_UPDATED,
 				payload: {
 					orderId: savedOrder.id,
+					userId: savedOrder.userId,
 					previousStatus,
 					status: savedOrder.status,
 				},

@@ -127,4 +127,8 @@ export class UserService {
   removeRole(dto: AssignRoleDto) {
     return this.send(ROLE_MESSAGE_PATTERN.REMOVE_ROLE, dto, 'remove role');
   }
+
+  updateAvatar(userId: string, avatarUrl: string) {
+    return this.send(USER_MESSAGE_PATTERN.UPDATE_AVATAR, { userId, avatarUrl }, 'update avatar');
+  }
 }

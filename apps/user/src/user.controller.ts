@@ -34,4 +34,9 @@ export class UserController {
 	async getProfile(userId: string): Promise<any> {
 		return await this.userService.getProfile(userId);
 	}
+
+	@MessagePattern({ cmd: USER_MESSAGE_PATTERN.UPDATE_AVATAR })
+	async updateAvatar(data: { userId: string; avatarUrl: string }): Promise<any> {
+		return await this.userService.updateAvatar(data.userId, data.avatarUrl);
+	}
 }

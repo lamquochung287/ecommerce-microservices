@@ -4,6 +4,7 @@ import { GatewayService } from './gateway.service';
 import { UserModule } from './user/user.module';
 import { SharedClientsModule } from './shared-clients.module';
 import { CachedModule } from '@lib/cached';
+import { MediaModule } from '@lib/media';
 import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { IdempotencyInterceptor } from './common/interceptor/idempotency.interceptor';
 import { RequestTrackerMiddleware } from './common/middleware/request-tracker.middleware';
@@ -11,6 +12,9 @@ import { TransformInterceptor } from './common/interceptor/transform.interceptor
 import { CommonConfigModule } from '@lib/common';
 import { ProductModule } from './product/product.module';
 import { OrdersModule } from './orders/orders.module';
+import { PaymentModule } from './payment/payment.module';
+import { ReviewModule } from './review/review.module';
+import { PromotionModule } from './promotion/promotion.module';
 import { HealthModule } from './health/health.module';
 import { TcpResilienceModule } from './common/tcp-resilience.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
@@ -22,10 +26,14 @@ import { ConfigService } from '@nestjs/config';
 		SharedClientsModule,
 		CommonConfigModule,
 		CachedModule,
+		MediaModule,
 		TcpResilienceModule,
 		UserModule,
 		ProductModule,
 		OrdersModule,
+		PaymentModule,
+		ReviewModule,
+		PromotionModule,
 		HealthModule,
 		ThrottlerModule.forRootAsync({
 			inject: [ConfigService],

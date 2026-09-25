@@ -5,7 +5,7 @@ export interface CaptureResult {
 }
 
 export interface PaymentProvider {
-	capture(orderId: string, amount: number): Promise<CaptureResult>;
+	capture(orderId: string, amount: number, idempotencyKey: string): Promise<CaptureResult>;
 }
 
 export const PAYMENT_PROVIDER = 'PAYMENT_PROVIDER';
