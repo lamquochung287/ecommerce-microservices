@@ -38,10 +38,12 @@ import { ConfigService } from '@nestjs/config';
 		ThrottlerModule.forRootAsync({
 			inject: [ConfigService],
 			useFactory: (configService: ConfigService) => ({
+				// Default: 100 request/phút cho mỗi IP trên toàn bộ route. Route nhạy cảm (login) override
+				// chặt hơn qua @Throttle ở controller — xem apps/gateway/src/user/user.controller.ts.
 				throttlers: [
 					{
 						ttl: 60000,
-						limit: 100000,
+						limit: configService.get<number>('THROTTLE_LIMIT_DEFAULT', 100),
 					},
 				],
 				storage: new ThrottlerStorageRedisService({

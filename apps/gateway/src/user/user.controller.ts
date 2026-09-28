@@ -1,4 +1,6 @@
 import { Controller, Get, Post, Body, Param, HttpCode, HttpStatus, UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserService } from './user.service';
 import { LoginUserDto, RegisterUserDto } from './dto/user.dto';
@@ -6,6 +8,7 @@ import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { GetUser } from '../common/decorator/get-user.decorator';
 import { MediaService } from '@lib/media';
 
+@ApiTags('User')
 @Controller('user')
 export class UserController {
   constructor(
@@ -15,11 +18,13 @@ export class UserController {
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   register(@Body() dto: RegisterUserDto) {
     return this.userService.register(dto);
   }
 
   @Post('login')
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   login(@Body() dto: LoginUserDto) {
     return this.userService.login(dto);
   }

@@ -1,9 +1,11 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { UserService } from './user.service';
 import { CreateAddressDto, UpdateAddressDto } from '../../../user/src/address/address.dto';
 
+@ApiTags('Address Book')
 @Controller('addresses')
 @UseGuards(JwtAuthGuard)
 export class AddressController {

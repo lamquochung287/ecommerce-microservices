@@ -1,4 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { ClientProxy } from '@nestjs/microservices';
 import { HealthCheckService, HealthCheck, HealthIndicatorService } from '@nestjs/terminus';
 import { firstValueFrom, timeout, catchError } from 'rxjs';
@@ -6,6 +7,7 @@ import { NAME_SERVICE_TCP } from 'libs/constant/port-tcp.constant';
 import { HEALTH_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
 import { RedisHealthIndicator } from '@lib/cached';
 
+@ApiTags('Health')
 @Controller('health')
 export class HealthController {
 	constructor(

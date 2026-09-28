@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards, BadRequestException } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { Request } from 'express';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { OrdersService } from './orders.service';
@@ -6,6 +7,7 @@ import { ProductService } from '../product/product.service';
 import { Cart, CartItemDto } from '../../../orders/src/cart/cart-item.dto';
 import { ShippingAddressDto } from '../../../orders/src/dto/order.dto';
 
+@ApiTags('Cart')
 @Controller('cart')
 @UseGuards(JwtAuthGuard)
 export class CartController {

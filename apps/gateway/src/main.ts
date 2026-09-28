@@ -6,18 +6,25 @@ import { GatewayModule } from './gateway.module';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { HttpExceptionFilter } from './common/fliters/http-exception.filter';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import * as compression from 'compression';
 
 async function bootstrap() {
 	const app = await NestFactory.create(GatewayModule);
-	
-	// Security, Compression & CORS
+	const configService = app.get(ConfigService);
+
+	// Security & Compression
 	app.use(helmet());
 	app.use(compression());
-	app.enableCors();
 
-	const configService = app.get(ConfigService);
+	// CORS origin đọc từ .env (CORS_ORIGINS, phân tách bởi dấu phẩy) thay vì mở toàn bộ (*) như trước.
+	const corsOrigins = configService.get<string>('CORS_ORIGINS', 'http://localhost:3000');
+	app.enableCors({
+		origin: corsOrigins.split(',').map((origin) => origin.trim()),
+		credentials: true,
+	});
+
 	app.useGlobalPipes(
 		new ValidationPipe({
 			whitelist: true,
@@ -27,9 +34,20 @@ async function bootstrap() {
 	);
 	app.useGlobalFilters(new HttpExceptionFilter());
 	app.enableShutdownHooks();
+
+	const swaggerConfig = new DocumentBuilder()
+		.setTitle('Ecommerce API')
+		.setDescription('API Gateway cho hệ thống ecommerce microservices')
+		.setVersion('1.0')
+		.addBearerAuth()
+		.build();
+	const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
+	SwaggerModule.setup('api/docs', app, swaggerDocument);
+
 	const port = configService.get<number>('PORT', 3000);
 	await app.listen(port, () => {
 		console.log(`Gateway is running on port ${port}`);
+		console.log(`Swagger docs available at http://localhost:${port}/api/docs`);
 	});
 }
 bootstrap();

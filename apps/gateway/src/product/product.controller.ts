@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, UseInterceptors, UploadedFile, Query } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { PermissionGuard } from '../common/guard/permission.guard';
@@ -9,6 +10,7 @@ import { CreateProductDto, GetProductsFilterDto, UpdateProductDto } from '../../
 import { AdjustStockDto } from '../../../product/src/dto/product-variant.dto';
 import { MediaService } from '@lib/media';
 
+@ApiTags('Products')
 @Controller('products')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class ProductController {

@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { PermissionGuard } from '../common/guard/permission.guard';
 import { RequirePermission } from '../common/decorator/require-permission.decorator';
@@ -6,6 +7,7 @@ import { Action, ModuleName } from 'libs/constant/permission.constant';
 import { ProductService } from './product.service';
 import { CreateBrandDto, UpdateBrandDto } from '../../../product/src/dto/brand.dto';
 
+@ApiTags('Product Brands')
 @Controller('brands')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class BrandController {
