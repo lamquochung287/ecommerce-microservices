@@ -79,7 +79,7 @@ Các service:
 - **Redis**: localhost:6379
 - **Jaeger UI**: http://localhost:16686
 - **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3005 (mặc định: admin/admin)
+- **Grafana**: http://localhost:3005 (mặc định: admin/admin) — dashboard "Ecommerce - Server Overview" được provision sẵn từ `grafana/`
 - **MinIO Console**: http://localhost:9001 (mặc định: minioadmin/minioadmin)
 
 ### 3. Chạy Migration

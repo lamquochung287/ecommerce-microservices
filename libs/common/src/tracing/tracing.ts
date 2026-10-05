@@ -21,7 +21,12 @@ export function setupTracing(serviceName: string, metricsPort: number) {
     }),
     traceExporter: exporter,
     metricReader: prometheusExporter,
-    instrumentations: [getNodeAutoInstrumentations()],
+    instrumentations: [
+      getNodeAutoInstrumentations({
+        // Tắt mặc định trong auto-instrumentations; bật để có metrics process.* và system.* (CPU, RAM, network)
+        '@opentelemetry/instrumentation-host-metrics': { enabled: true },
+      }),
+    ],
   });
 
   sdk.start();
