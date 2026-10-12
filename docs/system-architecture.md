@@ -1,8 +1,8 @@
 # System Architecture
 
-**Ngày cập nhật**: 2026-09-28
+**Ngày cập nhật**: 2026-10-05
 
-Tài liệu này mô tả kiến trúc tổng thể của hệ thống: các thành phần, giao tiếp giữa services, và observability stack. Các flow nghiệp vụ chi tiết (checkout saga, outbox pattern, auth flow, gateway request flow) được tách riêng theo từng feature — xem mục **Tài liệu liên quan** ở cuối file.
+Tài liệu này mô tả kiến trúc tổng thể của hệ thống: các thành phần, giao tiếp giữa services, và observability stack. Các flow nghiệp vụ end-to-end xem [business-flows.md](./business-flows.md); xử lý chi tiết từng module xem [module-processing-flows.md](./module-processing-flows.md); đánh đổi thiết kế & rủi ro xem [design-trade-offs.md](./design-trade-offs.md). Các pattern riêng (checkout saga, outbox, auth, gateway) tách theo từng file — xem **Tài liệu liên quan** ở cuối.
 
 ---
 
@@ -80,7 +80,7 @@ Tài liệu này mô tả kiến trúc tổng thể của hệ thống: các th�
     │                                                        │
     │  ┌──────────────┐  ┌──────────┐  ┌──────────────┐    │
     │  │  Jaeger      │  │Prometheus│  │  Grafana     │    │
-    │  │ (:16686)     │  │ (:9090)  │  │ (:3005→3000) │    │
+    │  │ (:16686)     │  │ (:9090)  │  │ (:3100→3000) │    │
     │  │              │  │          │  │              │    │
     │  │ • Tracing    │  │ • Metrics│  │ • Dashboards │    │
     │  │ • OTLP       │  │ • Per-svc│  │ • Alerts     │    │
@@ -107,8 +107,8 @@ const order = await firstValueFrom(
   this.orderClient.send({ cmd: ORDER_MESSAGE_PATTERN.CREATE_ORDER }, createOrderDto),
 );
 
-// Gateway emit thông báo (fire-and-forget)
-this.notificationClient.emit(ORDER_EVENT_TYPE.ORDER_CREATED, { orderId, userId });
+// Orders (OutboxWorker) emit event (fire-and-forget, không có ack) tới từng subscriber
+subscriber.emit('order.created', { orderId, userId, totalAmount });
 ```
 
 ### 2. Inter-Service Communication (giao tiếp giữa các microservice)
@@ -132,17 +132,18 @@ const result = await firstValueFrom(
 ### 3. Event Listener mẫu (Notification lắng nghe sự kiện Order)
 
 ```typescript
-@Controller('order-events')
+// apps/notification/src/order-events.controller.ts
+@Controller()
 export class OrderEventsController {
-  @EventPattern(ORDER_EVENT_TYPE.ORDER_CREATED) // 'order.created'
-  async onOrderCreated(data: OrderCreatedEvent) {
-    const user = await firstValueFrom(
-      this.userClient.send({ cmd: USER_MESSAGE_PATTERN.GET_USER_INFO }, { userId: data.userId }),
-    );
-    await this.emailProvider.send(user.email, `Order ${data.orderId} created`);
+  @EventPattern('order.created')
+  async onOrderCreated(@Payload() payload: { orderId: string; userId: string; totalAmount: number }) {
+    // GET_USER_INFO(userId) → email (lỗi: fallback userId) → EmailProvider.send → ghi sent_notifications
+    await this.notifyUser(payload.userId, `Đơn hàng ${payload.orderId} đã được tạo`, '...', 'order.created');
   }
 }
 ```
+
+> Giao hàng event là **at-most-once** (TCP `emit` không ack, Outbox đánh dấu `PUBLISHED` ngay sau khi emit) — xem [design-trade-offs.md §2.4](./design-trade-offs.md#24-transactional-outbox--polling-mỗi-giây).
 
 Chi tiết pattern Transactional Outbox (đảm bảo event không bị mất) → xem [system-architecture-orders-flow.md](./system-architecture-orders-flow.md).
 
@@ -152,10 +153,10 @@ Chi tiết pattern Transactional Outbox (đảm bảo event không bị mất) �
 
 | Pattern | Dùng ở đâu | Mục đích | Chi tiết |
 |---|---|---|---|
-| Checkout Saga | Orders service | Điều phối reserve stock → tạo order → charge payment, có compensation khi fail | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
+| Checkout Saga | Orders service | Điều phối trừ kho → tạo order (PENDING) → charge payment → PROCESSING + outbox, có compensation khi payment fail/timeout | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
 | Transactional Outbox | Orders service | Đảm bảo event không mất khi service crash giữa chừng | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
 | Optimistic Locking | Product (`@VersionColumn`) | Tránh race condition khi nhiều request cùng trừ stock | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
-| Pessimistic Locking | Promotion (voucher) | Tránh 1 voucher bị dùng vượt `usageLimit` khi có concurrent request | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
+| Pessimistic Locking | Promotion (voucher, `SELECT … FOR UPDATE`) | Tránh 1 voucher bị dùng vượt `usageLimit` khi có concurrent request | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
 | CQRS | Orders, Product, Payment, Review, Promotion | Tách rõ write (Command) và read (Query) | [code-standards.md](./code-standards.md#cqrs-structure) |
 | JWT Auth + Redis session | Gateway + User service | Xác thực stateless nhưng có thể revoke qua Redis | [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) |
 | Gateway middleware chain | Gateway | Helmet → CORS → tracking (middleware) → **Guards (Jwt/Permission/Throttler) → Interceptors (Idempotency) → Pipes (Validation)** → Controller | [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) |
@@ -169,7 +170,7 @@ Chi tiết pattern Transactional Outbox (đảm bảo event không bị mất) �
 ```
 Mỗi service trong main.ts gọi setupTracing():
 ├─ Khởi tạo OpenTelemetry SDK
-├─ Kết nối Jaeger gRPC (localhost:4317)
+├─ Xuất trace tới Jaeger qua OTLP HTTP (localhost:4318/v1/traces)
 ├─ Auto-instrument NestJS, HTTP, DB, Redis calls
 ├─ Mỗi RPC call → tạo 1 span trong Jaeger
 └─ Jaeger UI tại http://localhost:16686
@@ -179,25 +180,18 @@ Mỗi service trong main.ts gọi setupTracing():
 ### Prometheus Metrics
 
 ```
-Mỗi service expose endpoint /metrics:
-├─ Port 9464 (gateway)
-├─ Port 9469 (notification)
-├─ Port 9470 (review)
-├─ Port 9471 (promotion)
-└─ Các service khác theo pattern 94XX
+Mỗi service expose /metrics (PrometheusExporter của OpenTelemetry) trên cổng riêng:
+gateway 9464 · user 9465 · product 9466 · orders 9467 · payment 9468
+notification 9469 · review 9470 · promotion 9471   (khớp prometheus.yml)
 
-Metrics gồm:
-├─ http_request_duration_seconds
-├─ http_request_total
-├─ nestjs_rpc_call_duration_seconds
-├─ database_query_duration_seconds
-└─ redis_operation_duration_seconds
+Metrics do auto-instrumentation + host-metrics sinh ra (HTTP, DB, Redis, process.*, system.*);
+tên metric cụ thể phụ thuộc phiên bản @opentelemetry — kiểm tra tại /metrics thay vì dựa vào danh sách cố định.
 ```
 
 ### Grafana Dashboards
 
 ```
-http://localhost:3005 (container grafana:3000)
+http://localhost:3100 (container grafana:3000)
 Đăng nhập mặc định: admin/admin
 
 Dashboard:
@@ -236,8 +230,8 @@ Dùng bởi:
 ## External Integrations & Planned Features
 
 ### Payment Provider
-- **Hiện tại**: `SimulatedPaymentProvider` (luôn thành công, phục vụ test)
-- **Kế hoạch**: vnpay/momo (scaffold đã có, chọn qua env `PAYMENT_PROVIDER`)
+- **Hiện tại**: `SimulatedPaymentProvider` (luôn thành công, bind cứng bằng `useClass` trong `PaymentModule`)
+- **Kế hoạch**: vnpay/momo — cần đổi binding sang `useFactory` theo env; interface `PaymentProvider` (`charge`, `verifyWebhook`) đã sẵn
 - **Trạng thái**: flow simulate chạy end-to-end, tích hợp provider thật chưa làm
 
 ### Email Notifications
@@ -246,7 +240,7 @@ Dùng bởi:
 - **Trạng thái**: event flow hoạt động, email chỉ log ra chứ chưa gửi thật
 
 ### Push Notifications
-- **Hiện tại**: `SimulatedPushProvider` (đã đăng ký DI nhưng chưa controller nào gọi)
+- **Hiện tại**: `SimulatedPushProvider` (đã đăng ký DI nhưng chưa handler nào gọi)
 - **Kế hoạch**: Firebase Cloud Messaging (FCM)
 - **Trạng thái**: chỉ scaffold, chưa hoạt động
 
@@ -342,6 +336,9 @@ readinessProbe:
 
 ## Tài liệu liên quan
 
+- [business-flows.md](./business-flows.md) — Luồng nghiệp vụ end-to-end, state machine đơn hàng, business rules
+- [module-processing-flows.md](./module-processing-flows.md) — Xử lý chi tiết từng module (Gateway, User, Product, Orders, Payment, Notification, Review, Promotion)
+- [design-trade-offs.md](./design-trade-offs.md) — Quyết định thiết kế, trade-off, rủi ro đã xác minh
 - [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Checkout Saga, Transactional Outbox, Optimistic/Pessimistic Locking, ví dụ flow checkout đầy đủ
 - [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) — Login, verify token, refresh token, logout
 - [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) — Middleware chain của Gateway, request/response envelope

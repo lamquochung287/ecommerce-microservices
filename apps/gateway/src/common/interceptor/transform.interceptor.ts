@@ -24,9 +24,10 @@ export interface ResponseEnvelope<T> {
 }
 
 @Injectable()
-export class TransformInterceptor<T>
-	implements NestInterceptor<T, ResponseEnvelope<T>>
-{
+export class TransformInterceptor<T> implements NestInterceptor<
+	T,
+	ResponseEnvelope<T>
+> {
 	intercept(
 		context: ExecutionContext,
 		next: CallHandler,
@@ -40,8 +41,13 @@ export class TransformInterceptor<T>
 				// Handle pagination data if it has meta inside
 				let responseData = data;
 				let extraMeta = {};
-				
-				if (data && typeof data === 'object' && 'meta' in data && 'data' in data) {
+
+				if (
+					data &&
+					typeof data === 'object' &&
+					'meta' in data &&
+					'data' in data
+				) {
 					responseData = data.data;
 					extraMeta = data.meta;
 				}

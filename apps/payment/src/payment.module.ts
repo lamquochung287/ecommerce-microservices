@@ -17,7 +17,10 @@ import { DatabaseModule } from '@lib/database';
 import { CommonConfigModule } from '@lib/common';
 import { HealthModule } from './health/health.module';
 
-export const CommandHandlers = [ChargePaymentHandler, HandlePaymentWebhookHandler];
+export const CommandHandlers = [
+	ChargePaymentHandler,
+	HandlePaymentWebhookHandler,
+];
 export const QueryHandlers = [GetTransactionHandler];
 
 @Module({

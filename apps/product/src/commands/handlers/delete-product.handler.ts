@@ -8,7 +8,8 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(DeleteProductCommand)
 export class DeleteProductHandler implements ICommandHandler<DeleteProductCommand> {
 	constructor(
-		@InjectRepository(Product) private readonly productRepository: Repository<Product>,
+		@InjectRepository(Product)
+		private readonly productRepository: Repository<Product>,
 	) {}
 
 	async execute(command: DeleteProductCommand) {

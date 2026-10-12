@@ -9,13 +9,16 @@ import { PORT_TCP } from 'libs/constant/port-tcp.constant';
 import { PromotionRpcExceptionFilter } from './filters/rpc-exception.filter';
 
 async function bootstrap() {
-	const app = await NestFactory.createMicroservice<MicroserviceOptions>(PromotionModule, {
-		transport: Transport.TCP,
-		options: {
-			host: 'localhost',
-			port: PORT_TCP.PROMOTION_TCP_PORT,
+	const app = await NestFactory.createMicroservice<MicroserviceOptions>(
+		PromotionModule,
+		{
+			transport: Transport.TCP,
+			options: {
+				host: 'localhost',
+				port: PORT_TCP.PROMOTION_TCP_PORT,
+			},
 		},
-	});
+	);
 
 	app.useGlobalFilters(new PromotionRpcExceptionFilter());
 	app.useGlobalPipes(
@@ -26,6 +29,8 @@ async function bootstrap() {
 	);
 	app.enableShutdownHooks();
 	await app.listen();
-	console.log(`Promotion microservice is running on port ${PORT_TCP.PROMOTION_TCP_PORT}`);
+	console.log(
+		`Promotion microservice is running on port ${PORT_TCP.PROMOTION_TCP_PORT}`,
+	);
 }
 bootstrap().catch((err) => console.error(err));

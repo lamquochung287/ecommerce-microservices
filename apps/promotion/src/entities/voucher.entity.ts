@@ -1,4 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, Unique } from 'typeorm';
+import {
+	Entity,
+	PrimaryGeneratedColumn,
+	Column,
+	CreateDateColumn,
+	Unique,
+} from 'typeorm';
 
 export enum DiscountType {
 	PERCENTAGE = 'PERCENTAGE',

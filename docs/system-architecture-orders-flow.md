@@ -1,6 +1,6 @@
 # System Architecture — Orders Flow
 
-**Ngày cập nhật**: 2026-09-28
+**Ngày cập nhật**: 2026-10-05
 
 Tài liệu con của [system-architecture.md](./system-architecture.md). Mô tả chi tiết các pattern nghiệp vụ trong Orders service: Checkout Saga, Transactional Outbox, Optimistic/Pessimistic Locking, và flow checkout đầy đủ end-to-end.
 
@@ -14,48 +14,44 @@ Saga phân tán điều phối flow checkout phức tạp, có compensation logi
 
 ```
 Step 1: Reserve Inventory (thực chất là trừ stock ngay)
-├─ Gọi: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK, delta = -quantity
-├─ Input: { productId, delta: -quantity }
-└─ Output: { success, newStock } (hoặc lỗi nếu không đủ hàng)
-   └─ NẾU FAIL giữa chừng (nhiều item): [Compensation] gọi lại ADJUST_STOCK với delta dương cho các item đã trừ trước đó
+├─ Gọi: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK, delta = -quantity (tuần tự từng item, timeout 10s)
+└─ NẾU 1 item fail giữa chừng: [Compensation] hoàn (delta dương) các item đã trừ trước đó rồi ném lỗi gốc (409 "Không đủ tồn kho")
 
-Step 2: Create Order in DB (TRANSACTION RIÊNG, tách khỏi Step 1)
-├─ Action: INSERT Order (status=PENDING) + OrderItems
-├─ Action: INSERT Outbox row (eventType='order.created')
-└─ Transaction: cả 2 cùng thành công hoặc cùng fail
-   └─ ⚠️ Gap: nếu crash giữa Step 1 và Step 2, stock đã bị trừ vĩnh viễn nhưng chưa có Order/Outbox nào được tạo để trigger compensation — xem mục "Gap chưa được xử lý" bên dưới
+Step 2: Create Order in DB (TRANSACTION #1, tách khỏi Step 1)
+├─ INSERT Order (status=PENDING) + OrderItems (+ snapshot địa chỉ giao hàng, giá)
+└─ Chưa ghi Outbox ở bước này
+   └─ ⚠️ Gap: crash giữa Step 1 và Step 2 → stock đã bị trừ nhưng chưa có Order để biết cần hoàn
 
 Step 3: Charge Payment
-├─ Gọi: Payment.CHARGE_PAYMENT với idempotencyKey=orderId
-├─ Input: { orderId, amount, idempotencyKey }
-└─ Output: { transactionId, status }
-   ├─ NẾU response trả về SUCCESS: [Next Step] Cập nhật order status
-   └─ NẾU response trả về FAIL (rõ ràng): [Compensation] Release inventory (ADJUST_STOCK delta dương) + Cancel order
-   └─ ⚠️ Gap: nếu TCP call chính nó timeout/exception (không phải response fail), lỗi propagate lên KHÔNG được catch — inventory không được release, order kẹt ở PENDING
+├─ Gọi: Payment.CHARGE_PAYMENT { orderId, amount, idempotencyKey = orderId } (timeout 10s)
+├─ TcpPaymentProvider bắt mọi lỗi TCP/timeout → quy về { success:false, failureReason:'Payment service unavailable' }
+└─ NẾU success=false: [Compensation] release stock (best-effort) + Order → CANCELLED + ném RpcException 402
 
-Step 4: Confirm & Publish Event
-├─ Action: UPDATE Order (status=PROCESSING)
-├─ Action: Outbox đã được insert ở Step 2
+Step 4: Confirm & Publish Event (TRANSACTION #2)
+├─ UPDATE Order → PROCESSING
+├─ INSERT Outbox (eventType='order.created', payload={orderId,userId,totalAmount})
 └─ OutboxWorker sẽ fan-out event tới Notification
 ```
 
 **Tính chất quan trọng**:
-- **Atomicity**: Step 2 & 4 là DB transaction (thành công cùng nhau hoặc fail cùng nhau) — nhưng Step 1 (trừ stock) KHÔNG cùng transaction với Step 2, vì nó là 1 TCP call ra service khác
-- **Idempotency**: `Payment.CHARGE_PAYMENT` dùng `idempotencyKey=orderId` để tránh charge 2 lần khi retry
-- **Compensation**: chỉ trigger khi nhận được response fail rõ ràng từ Payment, không bắt được trường hợp timeout/exception (xem gap ở Step 3)
+- **Atomicity**: chỉ từng transaction (#1, #2) là atomic; Step 1 (TCP trừ kho) và Step 3 (TCP charge) nằm ngoài DB transaction.
+- **Idempotency**: `Payment.CHARGE_PAYMENT` khử trùng theo `idempotencyKey = orderId`.
+- **Compensation**: kích hoạt cả khi Payment trả fail lẫn khi timeout/exception (đã sửa so với bản trước). `release()` là best-effort — lỗi chỉ được log.
+- Outbox chỉ được ghi khi đơn thành công (Step 4) và khi `UpdateOrderStatus`; đơn CANCELLED do payment fail **không** phát event.
 
-### Gap chưa được xử lý (điểm hay bị hỏi trong phỏng vấn)
+### Gap chưa được xử lý
 
-1. **Failure window giữa Step 1 và Step 2**: nếu process crash sau khi đã gọi `ADJUST_STOCK` (trừ stock) nhưng trước khi transaction tạo Order commit xong, stock bị trừ vĩnh viễn mà không có Order nào tồn tại để biết cần hoàn lại — không có outbox event, không ai theo dõi được. Đây là hệ quả của việc dùng nhiều transaction riêng biệt (DB tx + TCP call) thay vì 1 unit of work thực sự — trade-off cố hữu của distributed saga so với transaction đơn.
-2. **Payment TCP timeout/exception không được compensate**: `CreateOrderHandler` chỉ compensate khi `paymentProvider.capture()` trả về `{ success: false }`. Nếu bản thân lời gọi TCP đó bị timeout hoặc throw exception (Payment service down, network drop), exception sẽ propagate lên mà không được catch trong logic compensation — stock đã reserve (trừ) trước đó không được release, đơn hàng kẹt ở PENDING.
-3. **Outbox `FAILED` sau khi hết retry**: `OutboxWorker` đánh dấu row là `FAILED` sau 5 lần retry, nhưng hiện chưa có cơ chế alerting hay tool replay thủ công cho các row này — nếu bị hỏi "làm sao biết event bị mất", câu trả lời trung thực là: hiện tại phải query trực tiếp bảng `outbox WHERE status='FAILED'`.
+1. **Cửa sổ lỗi S1→S2 / S2→S3**: crash process sau khi đã trừ kho nhưng trước khi có order (hoặc order kẹt `PENDING`) → kho bị trừ mà không có dấu vết/compensation, chưa có job quét đơn `PENDING` quá hạn. Là hệ quả của saga không có state bền.
+2. **Payment charge thành công nhưng phản hồi timeout**: Orders coi là fail → huỷ đơn + hoàn kho, trong khi tiền đã trừ. Idempotency key giúp lần retry trả đúng kết quả cũ, nhưng chưa có job đối soát.
+3. **Outbox `FAILED`** sau 5 lần: không alert/replay; ngoài ra `emit` TCP không ack nên thực tế at-most-once (xem mục 2).
+4. **`payment_succeeded/failed`** do Payment emit không có consumer ở Orders → `PROCESSING→PAID` chỉ xảy ra bằng PATCH thủ công.
 
 **Sơ đồ flow**:
 ```
-Request → Reserve Stock ──OK──> Create Order ──OK──> Charge Payment ──OK──> Confirm
-               │                                            │
-               FAIL ◄─── FAIL ──────────── Cancel ◄── FAIL ◄─ Release Stock
-                           (Compensation)
+Request → Reserve Stock ──OK──> Create Order(PENDING) ──OK──> Charge Payment ──OK──> PROCESSING + Outbox
+               │ FAIL                                              │ FAIL / timeout
+               ▼                                                   ▼
+        (hoàn các item đã trừ)                  Release Stock + Order=CANCELLED + 402
 ```
 
 > **Gap đã biết**: `CreateOrderHandler` chỉ tính `taxAmount`/`shippingFee` server-side, còn `unitPrice` của từng item vẫn lấy từ DTO đầu vào — bản thân Orders service không tự re-validate lại với giá gốc từ Product. Trong thực tế Gateway's `/cart/checkout` (flow khách hàng dùng) đã set `unitPrice` server-side từ Product trước khi gọi tới đây, nhưng endpoint `/orders` tạo trực tiếp thì không, nên vẫn còn khai thác được qua đường đó. Xem [project-roadmap.md](./project-roadmap.md) mục gap #6.
@@ -70,13 +66,12 @@ Request → Reserve Stock ──OK──> Create Order ──OK──> Charge Pa
 ┌──────────────────────────────────────────────────────────────┐
 │         Order Service (Create Order Transaction)             │
 │                                                              │
+│  (Transaction #2 của checkout, hoặc UpdateOrderStatus)       │
 │  1. BEGIN TRANSACTION                                        │
-│  2. INSERT orders (status=PENDING)                           │
-│  3. INSERT order_items (...)                                 │
-│  4. INSERT outbox (eventType='order.created', payload={...}) │
-│  5. COMMIT                                                   │
-│     ↓                                                         │
-│     Hoặc TẤT CẢ thành công (commit) hoặc TẤT CẢ fail (rollback) │
+│  2. UPDATE orders SET status = ...                           │
+│  3. INSERT outbox (eventType='order.created' |               │
+│                    'order.status_updated', payload={...})    │
+│  4. COMMIT  (đổi trạng thái + ghi event: all-or-nothing)     │
 └──────────────────────────────────────────────────────────────┘
           │
           │ OutboxWorker chạy @Cron('EVERY_SECOND')
@@ -86,14 +81,17 @@ Request → Reserve Stock ──OK──> Create Order ──OK──> Charge Pa
 │                                                              │
 │  1. SELECT * FROM outbox WHERE status='PENDING' LIMIT 20     │
 │  2. VỚI MỖI row:                                             │
-│     a. Emit event qua TCP tới Order service                  │
-│     b. Emit event qua TCP tới Notification service           │
+│     a. emit tới ORDER_TCP_CLIENT (trỏ chính Orders, không    │
+│        có handler → bị bỏ)                                   │
+│     b. emit tới NOTIFICATION_TCP_CLIENT                      │
 │     c. UPDATE outbox SET status='PUBLISHED'                  │
-│  3. NẾU retryCount >= 5 → SET status='FAILED'                │
+│  3. Lỗi đồng bộ khi emit: retryCount++, ≥5 → 'FAILED'       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
 Vì NestJS TCP không hỗ trợ broadcast, `OutboxWorker` phải tự loop qua nhiều `ClientProxy` (Order + Notification) để fan-out thủ công.
+
+> **Giới hạn**: `emit` không có ack và row bị đánh dấu `PUBLISHED` ngay → at-most-once tới consumer; nhiều instance Orders sẽ phát trùng (không `SKIP LOCKED`). Chi tiết: [design-trade-offs.md §2.4](./design-trade-offs.md#24-transactional-outbox--polling-mỗi-giây).
 
 ---
 
@@ -141,21 +139,18 @@ Flow end-to-end khi user mua hàng:
 
 ```
 1. CLIENT REQUEST (Browser)
-   POST /orders/checkout
-   Body: {
-     items: [{ productId, quantity }, ...],
-     shippingAddressId,
-     voucherId (optional)
-   }
+   POST /cart/checkout
+   Body: ShippingAddressDto { recipientName, recipientPhone, addressLine1, city, country, ... }
+   (items lấy từ giỏ hàng Redis; Gateway snapshot unitPrice từ Product.GET_PRODUCT; chưa hỗ trợ voucher)
    Headers: Authorization: Bearer {accessToken}
 
    ↓ (HTTPS)
 
 2. GATEWAY LAYER
    • HttpExceptionFilter: bắt mọi lỗi HTTP
+   • RequestTracker: x-api-key + x-request-id; ThrottlerGuard
    • JwtAuthGuard: verify JWT qua USER_SERVICE.VERIFY_TOKEN (TCP)
-   • PermissionGuard: check user.permissions bitmask
-   • ValidationPipe: validate CreateOrderDto
+   • CartController.checkout: đọc cart → lấy giá từ Product → Orders.CreateOrder → clearCart
 
    ↓ (TCP)
 
@@ -166,10 +161,8 @@ Flow end-to-end khi user mua hàng:
    └─ NẾU FAIL: Throw error (gateway bắt → 400)
 
    Step B: Tạo order trong DB (transaction RIÊNG, không chung với Step A)
-   ├─ INSERT orders (status='PENDING')
-   ├─ INSERT order_items (...)
-   ├─ INSERT outbox (eventType='order.created', payload=order)
-   └─ COMMIT (all-or-nothing)
+   ├─ INSERT orders (status='PENDING') + order_items (...)
+   └─ COMMIT
 
    Step C: Charge payment
    ├─ Gọi: PAYMENT_SERVICE.CHARGE_PAYMENT({
@@ -182,8 +175,8 @@ Flow end-to-end khi user mua hàng:
 
    Step D: Confirm order (transaction thứ 2)
    ├─ UPDATE orders SET status='PROCESSING'
-   ├─ Outbox row từ Step B sẽ được OutboxWorker nhặt lên
-   └─ COMMIT
+   ├─ INSERT outbox (eventType='order.created', payload={orderId,userId,totalAmount})
+   └─ COMMIT  (OutboxWorker sẽ nhặt row này)
 
    ↓ Response về Gateway
 
@@ -201,7 +194,7 @@ Flow end-to-end khi user mua hàng:
        "id": "order-uuid",
        "status": "PROCESSING",
        "items": [...],
-       "totalPrice": 100.00
+       "totalAmount": 100.00
      }
    }
 
@@ -240,14 +233,14 @@ Client          Gateway          Order Service       Product Service      Paymen
   │                │                  │  (delta âm)       │                     │
   │                │                  │<─ OK ────────────│                     │
   │                │                  │                  │                     │
-  │                │                  │─ INSERT Order ───┤ (DB transaction)    │
-  │                │                  │  + INSERT Outbox │                     │
+  │                │                  │─ INSERT Order ───┤ (DB transaction #1) │
+  │                │                  │  (PENDING)       │                     │
   │                │                  │                  │                     │
   │                │                  │─ Charge Payment ──────────────────────>│
   │                │                  │<─ Transaction ID ─────────────────────│
   │                │                  │                  │                     │
-  │                │                  │─ UPDATE Order ───┤ (DB transaction)    │
-  │                │                  │  status=PROCESSING
+  │                │                  │─ UPDATE Order ───┤ (DB transaction #2) │
+  │                │                  │  =PROCESSING + INSERT Outbox
   │                │<─ Order Object ──│                  │                     │
   │<─ 201 Created ─│                  │                  │                     │
   │  {order data}  │                  │                  │                     │
@@ -271,6 +264,7 @@ Client          Gateway          Order Service       Product Service      Paymen
 ## Tài liệu liên quan
 
 - [system-architecture.md](./system-architecture.md) — Tổng quan kiến trúc, sơ đồ hệ thống
+- [business-flows.md](./business-flows.md) · [module-processing-flows.md](./module-processing-flows.md) · [design-trade-offs.md](./design-trade-offs.md)
 - [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) — Login, verify token, refresh, logout
 - [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) — Middleware chain Gateway
 - [project-roadmap.md](./project-roadmap.md) — Các gap đã biết (price trust, refund compensation, v.v.)

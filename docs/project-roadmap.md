@@ -1,6 +1,6 @@
 # Project Roadmap
 
-**Ngày cập nhật**: 2026-09-28
+**Ngày cập nhật**: 2026-10-05
 **Trạng thái**: Early-stage, Phase 0-2 đã hoàn thành, Phase 3 đang lên kế hoạch
 
 ---
@@ -181,13 +181,20 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 
 ### Gap nghiêm trọng (nên fix sớm)
 
+Chi tiết bằng chứng/đề xuất: [design-trade-offs.md §5](./design-trade-offs.md#5-rủi-ro--gap-đã-xác-minh-trong-code).
+
 | Gap | Ảnh hưởng | Ưu tiên | Ghi chú |
 |-----|--------|----------|-------|
-| Tin cậy unitPrice từ client | Rủi ro tamper giá qua endpoint `/orders` trực tiếp | CAO | Orders service không tự validate lại giá; `/cart/checkout` (flow thường) có che chắn nhưng `/orders` trực tiếp thì không |
-| Chưa cache Product | Hiệu năng (N+1 reads) | CAO | Product catalog chưa cache dù đã có sẵn libs/cached |
-| Refund compensation | Flow refund chưa hoàn chỉnh | TRUNG BÌNH | Chưa có compensation refund→payment provider (cơ chế hoàn tiền chưa rõ) |
-| Edge case Order state | State machine chưa nhất quán | TRUNG BÌNH | Full refund trên order PAID/SHIPPED không tự chuyển sang REFUNDED |
-| Push notification | Tính năng chưa xong | TRUNG BÌNH | PushProvider đã wiring nhưng chưa handler nào gọi |
+| Tin `unitPrice` + `userId` từ client ở `POST /orders` | Customer đặt đơn giá tuỳ ý / mạo danh user | CAO | Chỉ `/cart/checkout` lấy giá server-side (R1) |
+| Thiếu kiểm tra chủ sở hữu (orders, refunds, addresses) | Đọc/sửa dữ liệu của user khác; `GET /orders` không `userId` trả mọi đơn | CAO | Mới có phân quyền theo module/action (R2, R3) |
+| Saga không có state bền | Kho bị trừ khi crash giữa các bước; payment charge xong nhưng timeout → huỷ đơn | CAO | Cần job reconcile đơn `PENDING` + đối soát payment |
+| Orders không nghe `payment_succeeded/failed` | `PROCESSING→PAID` chỉ bằng PATCH thủ công | TRUNG BÌNH | Bắt buộc nối khi dùng provider async/webhook thật |
+| Outbox at-most-once | Event có thể mất khi consumer down; phát trùng khi nhiều instance | TRUNG BÌNH | Không ack, không `SKIP LOCKED`, Notification không khử trùng |
+| Cancel/Refund không có side-effect | Không hoàn kho/tiền; refund không tự `REFUNDED` khi order PAID/SHIPPED | TRUNG BÌNH | Chỉ cập nhật sổ sách (R5, R6) |
+| Voucher chưa nối checkout | Trừ lượt ngay khi apply, không hoàn; không giới hạn theo user | TRUNG BÌNH | R7 |
+| Register không gán role mặc định | User mới không gọi được API cần quyền | TRUNG BÌNH | R13 |
+| Chưa cache Product / search ILIKE không index | Hiệu năng với 50.000 sản phẩm seed | TRUNG BÌNH | Có sẵn libs/cached |
+| Push notification | Tính năng chưa xong | THẤP | PushProvider đã wiring nhưng chưa handler nào gọi |
 
 ### Gap không quan trọng (có thể trì hoãn)
 
@@ -197,7 +204,7 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 | Event handler còn stub | Observability/search | THẤP | `ProductCreatedEvent`, `OrderCreatedEvent` chỉ console.log (tương lai Kafka→Elasticsearch) |
 | Payment provider thật | Tính năng chưa xong | THẤP | `SimulatedPaymentProvider` hoạt động tốt, vnpay/momo thật chưa test |
 | Email provider thật | Tính năng chưa xong | THẤP | `SimulatedEmailProvider` hoạt động tốt, Resend/Brevo thật chưa test |
-| Flow refresh token của User | UX chưa rõ | THẤP | Chưa có endpoint refresh-token rotation rõ ràng; flow renew phía client chưa rõ |
+| Refresh token | UX | THẤP | **Xác nhận không có endpoint refresh** — access token 15 phút hết hạn phải login lại |
 | Kiến trúc User service | Tính nhất quán | THẤP | Không dùng CQRS (khác các service kia); có thể là chủ ý vì đơn giản |
 
 ### Dead code / Candidate dọn dẹp
@@ -247,14 +254,16 @@ Không có vấn đề backward compatibility; các phase sau đều dựa trên
 | Quyết định | Lý do | Trạng thái |
 |----------|-----------|--------|
 | **Không dùng RabbitMQ** | TCP point-to-point đủ dùng cho mục đích học tập; giảm độ phức tạp | ✅ Đã implement |
-| **Transactional Outbox** | Đảm bảo event không mất khi service crash | ✅ Đã implement |
-| **Simulate trước, thật sau** | Học pattern mà không vướng tài khoản bên thứ 3; đổi provider qua env | ✅ Đã implement |
+| **Transactional Outbox** | Ghi event cùng transaction với đổi trạng thái order (giao event hiện at-most-once, xem trade-offs §2.4) | ✅ Đã implement |
+| **Simulate trước, thật sau** | Học pattern mà không vướng tài khoản bên thứ 3; provider qua DI token (hiện bind cứng Simulated, chưa chọn theo env) | ✅ Đã implement (phần chọn theo env: TODO) |
 | **RBAC dạng bitmask** | Check permission hiệu quả bằng phép toán bit | ✅ Đã implement |
 | **Optimistic locking (Product)** | Đọc nhiều, ghi ít; retry logic chấp nhận được | ✅ Đã implement |
 | **Pessimistic locking (Promotion)** | Quan trọng: tránh voucher dùng vượt giới hạn; thời gian lock ngắn nên chấp nhận được | ✅ Đã implement |
 | **Không dùng SMS OTP** | Email OTP đã đủ; SMS tốn thêm chi phí/độ phức tạp | ✅ Đã quyết định, dùng Email |
 
 ### Quyết định cần chốt (Phase 3 sắp tới)
+
+Các câu hỏi thiết kế còn mở (nguồn giá, hoàn kho khi huỷ, voucher trong saga, payment async, ownership check, refresh token): xem [design-trade-offs.md §7](./design-trade-offs.md#7-quyết-định-đã-chốt-vs-cần-chốt).
 
 | Quyết định | Lựa chọn | Đề xuất | Trạng thái |
 |----------|---------|-----------------|--------|

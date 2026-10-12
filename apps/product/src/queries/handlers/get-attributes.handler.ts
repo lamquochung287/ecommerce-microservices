@@ -7,10 +7,14 @@ import { Attribute } from '../../entities/attribute.entity';
 @QueryHandler(GetAttributesQuery)
 export class GetAttributesHandler implements IQueryHandler<GetAttributesQuery> {
 	constructor(
-		@InjectRepository(Attribute) private readonly attributeRepository: Repository<Attribute>,
+		@InjectRepository(Attribute)
+		private readonly attributeRepository: Repository<Attribute>,
 	) {}
 
 	async execute() {
-		return this.attributeRepository.find({ relations: ['values'], order: { name: 'ASC' } });
+		return this.attributeRepository.find({
+			relations: ['values'],
+			order: { name: 'ASC' },
+		});
 	}
 }

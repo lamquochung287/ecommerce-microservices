@@ -76,3 +76,5 @@ node_modules/*
 .idea/*
 .husky/*
 .venv/*
+# Seed output (test credentials)
+scripts/seeded-users.csv

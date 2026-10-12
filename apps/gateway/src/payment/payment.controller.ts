@@ -10,11 +10,11 @@ import { PaymentService } from './payment.service';
 @Controller('payments')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class PaymentController {
-  constructor(private readonly paymentService: PaymentService) {}
+	constructor(private readonly paymentService: PaymentService) {}
 
-  @Get(':orderId/transaction')
-  @RequirePermission(ModuleName.PAYMENT, Action.READ)
-  getTransaction(@Param('orderId') orderId: string) {
-    return this.paymentService.getTransaction(orderId);
-  }
+	@Get(':orderId/transaction')
+	@RequirePermission(ModuleName.PAYMENT, Action.READ)
+	getTransaction(@Param('orderId') orderId: string) {
+		return this.paymentService.getTransaction(orderId);
+	}
 }

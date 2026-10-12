@@ -8,7 +8,9 @@ export class MediaService {
 	constructor(@Inject(MINIO_CLIENT) private readonly minioClient: Client) {}
 
 	async ensureBucketExists(bucket: string) {
-		const exists = await this.minioClient.bucketExists(bucket).catch(() => false);
+		const exists = await this.minioClient
+			.bucketExists(bucket)
+			.catch(() => false);
 		if (!exists) {
 			await this.minioClient.makeBucket(bucket);
 		}
@@ -17,13 +19,26 @@ export class MediaService {
 	// Trả về object path (không phải URL đầy đủ) — Gateway/service gọi tự ghép với public endpoint khi cần hiển thị.
 	async uploadFile(file: Express.Multer.File, folder: string): Promise<string> {
 		const objectName = `${folder}/${randomUUID()}-${file.originalname}`;
-		await this.minioClient.putObject(MEDIA_BUCKET, objectName, file.buffer, file.size, {
-			'Content-Type': file.mimetype,
-		});
+		await this.minioClient.putObject(
+			MEDIA_BUCKET,
+			objectName,
+			file.buffer,
+			file.size,
+			{
+				'Content-Type': file.mimetype,
+			},
+		);
 		return objectName;
 	}
 
-	async getPresignedUrl(objectName: string, expirySeconds = 3600): Promise<string> {
-		return this.minioClient.presignedGetObject(MEDIA_BUCKET, objectName, expirySeconds);
+	async getPresignedUrl(
+		objectName: string,
+		expirySeconds = 3600,
+	): Promise<string> {
+		return this.minioClient.presignedGetObject(
+			MEDIA_BUCKET,
+			objectName,
+			expirySeconds,
+		);
 	}
 }

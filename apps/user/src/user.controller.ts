@@ -8,7 +8,7 @@ import { USER_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
 
 @Controller()
 export class UserController {
-	constructor(private readonly userService: UserService) { }
+	constructor(private readonly userService: UserService) {}
 
 	@MessagePattern({ cmd: USER_MESSAGE_PATTERN.REGISTER_USER })
 	async register(dto: RegisterUserDTO): Promise<any> {
@@ -36,7 +36,10 @@ export class UserController {
 	}
 
 	@MessagePattern({ cmd: USER_MESSAGE_PATTERN.UPDATE_AVATAR })
-	async updateAvatar(data: { userId: string; avatarUrl: string }): Promise<any> {
+	async updateAvatar(data: {
+		userId: string;
+		avatarUrl: string;
+	}): Promise<any> {
 		return await this.userService.updateAvatar(data.userId, data.avatarUrl);
 	}
 }

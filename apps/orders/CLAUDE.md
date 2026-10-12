@@ -1,20 +1,35 @@
-# Hướng dẫn cho AI Agents - Orders Module (AGENTS_GUIDE.md)
+# Hướng dẫn cho AI Agents - Orders Module
 
 ## Vai trò
-Microservice chịu trách nhiệm quản lý Đơn hàng, giao dịch mua bán, thanh toán, và trạng thái đơn hàng.
+Microservice TCP :3002: Cart (Redis), Order, Refund, Checkout Saga, Transactional Outbox. **Bắt buộc CQRS**.
+Chi tiết: [docs/business-flows.md §2.4–2.6](../../docs/business-flows.md), [docs/system-architecture-orders-flow.md](../../docs/system-architecture-orders-flow.md), [docs/design-trade-offs.md §2](../../docs/design-trade-offs.md).
 
-## Chức năng chính
-- Tạo đơn hàng mới (Checkout - kết hợp kiểm tra giỏ hàng, tồn kho).
-- Cập nhật trạng thái đơn hàng (Pending -> Paid -> Processing -> Shipped -> Delivered / Canceled).
-- Tính toán tổng tiền, áp dụng mã giảm giá (voucher) nếu có.
+## Module con
+`cart/` (Redis `cart:{userId}`, TTL 30 ngày, chỉ `{productId,quantity}`) · `saga/` (`InventoryReservationService` → Product, `TcpPaymentProvider` → Payment) · `outbox/` (`OutboxWorker`) · `commands|queries|events/` · `entities/` (Order, OrderItem, Refund, Outbox).
 
-## Kiến trúc CQRS & Saga (Giao dịch phân tán)
-- Module này **bắt buộc** áp dụng CQRS (`@nestjs/cqrs`).
-- Thao tác tạo đơn hàng thường là một giao dịch phân tán (Distributed Transaction). Cần giao tiếp nội bộ thông qua TCP tới:
-  - `Product Service`: Để kiểm tra và trừ tồn kho (reserve inventory).
-  - `User Service`: Để lấy thông tin khách hàng, kiểm tra/cập nhật điểm thưởng, v.v.
-- Khi một bước trong quá trình tạo Order gặp lỗi, cần có cơ chế **Bù trừ (Compensation / Saga)**. (Ví dụ: Nếu trừ tiền/áp mã lỗi, phải hoàn lại tồn kho bên Product).
+## CreateOrderHandler (Saga, không có transaction bao trùm)
+`subtotal=Σqty×unitPrice`; `tax=round(subtotal×ORDER_TAX_RATE[0.1])`; `ship=ORDER_SHIPPING_FEE_FLAT[30000]`.
+1. **Reserve**: `ADJUST_STOCK(-qty)` tuần tự; 1 item lỗi → hoàn các item đã trừ rồi ném lỗi gốc.
+2. **Tx#1**: Order `PENDING` + items (snapshot giá + địa chỉ).
+3. **Charge**: `Payment.CHARGE_PAYMENT {orderId, amount, idempotencyKey=orderId}`. `success=false` **hoặc** lỗi/timeout TCP (provider đã bắt) → release stock (best-effort) + Order `CANCELLED` + `RpcException 402`.
+4. **Tx#2**: Order `PROCESSING` + ghi Outbox `order.created`.
 
-## Quy tắc lập trình tại Orders Service
-- Các thay đổi về trạng thái đơn hàng (Ví dụ: OrderCreated, OrderPaid) nên được publish thành Event (sử dụng `EventBus` trong CQRS và phát ra ngoài qua TCP EventPattern) để các module khác (như Notification, Analytics) có thể lắng nghe.
-- Luôn validate chặt chẽ tính toàn vẹn dữ liệu (VD: Sản phẩm có đủ số lượng không, giá sản phẩm từ DB chứ không tin tưởng giá từ client gửi lên) trước khi tạo Order.
+## State machine (`order-status.constant.ts`, dùng `canTransition`)
+PENDING→{PROCESSING,CANCELLED} · PROCESSING→{PAID,CANCELLED} · PAID→{SHIPPED,CANCELLED} · SHIPPED→DELIVERED · DELIVERED→REFUNDED · CANCELLED/REFUNDED cuối. `UpdateOrderStatus` = 1 transaction (đổi status + Outbox `order.status_updated`). **Không có code tự chuyển PROCESSING→PAID** (Orders chưa nghe `payment_succeeded`). Cancel thủ công **không** hoàn kho/tiền.
+
+## Refund
+Tạo khi order ∈ {PAID,SHIPPED,DELIVERED}; Σ refund không-REJECTED + amount ≤ `totalAmount`. Approve (transaction): PENDING→COMPLETED, đủ tổng & `canTransition→REFUNDED` thì Order=REFUNDED. Reject: PENDING→REJECTED. Chưa hoàn tiền thật/hoàn kho; chưa lock chống race.
+
+## OutboxWorker
+`@Cron` mỗi giây, 20 row `PENDING`/lần, `emit` tới Orders-chính-nó (không handler) + Notification, đánh dấu `PUBLISHED` ngay → **at-most-once**; `retryCount` ≥5 → `FAILED` (không alert/replay). Thêm subscriber = thêm `ClientProxy` vào `subscribers`. Nhiều instance → phát trùng.
+
+## Quy tắc
+- Event ra ngoài phải đi **Outbox cùng transaction** với thay đổi state, không `emit` trực tiếp trong handler.
+- Mọi tiền: `decimal` → ép `Number()` khi tính; làm tròn 2 số.
+- Gọi service khác luôn có `timeout()` (10s). Mọi lỗi nghiệp vụ = `RpcException({statusCode, message})`.
+
+## Gotchas
+- Orders **tin `unitPrice` và `userId` trong DTO** (an toàn chỉ khi đi qua `/cart/checkout`). Khi sửa: tự lấy giá từ Product.
+- Cửa sổ lỗi: crash sau reserve → kho mất; charge OK nhưng timeout → đơn bị huỷ dù đã trừ tiền; chưa có job quét `PENDING`.
+- `GetOrders` không `userId` trả toàn bộ, không phân trang. Voucher chưa tích hợp. Order không lưu transactionId/discount.
+- `OrderCreatedHandler` chỉ `console.log`.

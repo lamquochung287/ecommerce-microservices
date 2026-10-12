@@ -8,11 +8,14 @@ import { RpcException } from '@nestjs/microservices';
 @QueryHandler(GetOrderQuery)
 export class GetOrderHandler implements IQueryHandler<GetOrderQuery> {
 	constructor(
-		@InjectRepository(Order) private readonly orderRepository: Repository<Order>,
+		@InjectRepository(Order)
+		private readonly orderRepository: Repository<Order>,
 	) {}
 
 	async execute(query: GetOrderQuery) {
-		const order = await this.orderRepository.findOne({ where: { id: query.id } });
+		const order = await this.orderRepository.findOne({
+			where: { id: query.id },
+		});
 		if (!order) {
 			throw new RpcException({ statusCode: 404, message: 'Order not found' });
 		}

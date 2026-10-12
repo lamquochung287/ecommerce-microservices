@@ -5,7 +5,10 @@ import { Repository } from 'typeorm';
 import { RpcException } from '@nestjs/microservices';
 import { HandlePaymentWebhookCommand } from '../handle-payment-webhook.command';
 import { PaymentWebhookLog } from '../../entities/payment-webhook-log.entity';
-import { PAYMENT_PROVIDER, PaymentProvider } from '../../providers/payment-provider.interface';
+import {
+	PAYMENT_PROVIDER,
+	PaymentProvider,
+} from '../../providers/payment-provider.interface';
 
 @CommandHandler(HandlePaymentWebhookCommand)
 export class HandlePaymentWebhookHandler implements ICommandHandler<HandlePaymentWebhookCommand> {
@@ -20,11 +23,16 @@ export class HandlePaymentWebhookHandler implements ICommandHandler<HandlePaymen
 
 		const verifyResult = this.paymentProvider.verifyWebhook(payload, signature);
 		if (!verifyResult.valid) {
-			throw new RpcException({ statusCode: 400, message: 'Invalid webhook signature' });
+			throw new RpcException({
+				statusCode: 400,
+				message: 'Invalid webhook signature',
+			});
 		}
 
 		// Idempotent: cùng eventId gọi lại (retry từ provider) chỉ xử lý 1 lần — bảng có unique constraint trên eventId.
-		const existing = await this.webhookLogRepository.findOne({ where: { eventId: verifyResult.eventId } });
+		const existing = await this.webhookLogRepository.findOne({
+			where: { eventId: verifyResult.eventId },
+		});
 		if (existing) {
 			return { processed: false, alreadyProcessed: true };
 		}

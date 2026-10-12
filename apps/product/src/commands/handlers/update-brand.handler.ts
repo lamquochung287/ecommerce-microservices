@@ -8,7 +8,8 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(UpdateBrandCommand)
 export class UpdateBrandHandler implements ICommandHandler<UpdateBrandCommand> {
 	constructor(
-		@InjectRepository(Brand) private readonly brandRepository: Repository<Brand>,
+		@InjectRepository(Brand)
+		private readonly brandRepository: Repository<Brand>,
 	) {}
 
 	async execute(command: UpdateBrandCommand) {

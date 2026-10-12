@@ -12,18 +12,26 @@ import { RpcException } from '@nestjs/microservices';
 export class CreateProductHandler implements ICommandHandler<CreateProductCommand> {
 	constructor(
 		private readonly eventBus: EventBus,
-		@InjectRepository(Product) private readonly productRepository: Repository<Product>,
-		@InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
-		@InjectRepository(Brand) private readonly brandRepository: Repository<Brand>,
+		@InjectRepository(Product)
+		private readonly productRepository: Repository<Product>,
+		@InjectRepository(Category)
+		private readonly categoryRepository: Repository<Category>,
+		@InjectRepository(Brand)
+		private readonly brandRepository: Repository<Brand>,
 	) {}
 
 	async execute(command: CreateProductCommand) {
 		const { dto } = command;
 		const { categoryId, brandId, ...rest } = dto;
 
-		const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+		const category = await this.categoryRepository.findOne({
+			where: { id: categoryId },
+		});
 		if (!category) {
-			throw new RpcException({ statusCode: 404, message: 'Category not found' });
+			throw new RpcException({
+				statusCode: 404,
+				message: 'Category not found',
+			});
 		}
 
 		let brand: Brand | null = null;
@@ -43,7 +51,13 @@ export class CreateProductHandler implements ICommandHandler<CreateProductComman
 		const savedProduct = await this.productRepository.save(product);
 
 		// Publish event to EventBus
-		this.eventBus.publish(new ProductCreatedEvent(savedProduct.id, savedProduct.name, savedProduct.price));
+		this.eventBus.publish(
+			new ProductCreatedEvent(
+				savedProduct.id,
+				savedProduct.name,
+				savedProduct.price,
+			),
+		);
 
 		return savedProduct;
 	}

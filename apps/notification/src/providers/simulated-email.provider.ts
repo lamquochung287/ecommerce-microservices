@@ -8,7 +8,9 @@ export class SimulatedEmailProvider implements EmailProvider {
 	private readonly logger = new Logger(SimulatedEmailProvider.name);
 
 	async send(to: string, subject: string, body: string): Promise<SendResult> {
-		this.logger.log(`[SIMULATED EMAIL] to=${to} subject="${subject}" body="${body}"`);
+		this.logger.log(
+			`[SIMULATED EMAIL] to=${to} subject="${subject}" body="${body}"`,
+		);
 		return { success: true };
 	}
 }

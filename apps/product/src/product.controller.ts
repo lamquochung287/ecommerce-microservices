@@ -20,10 +20,18 @@ import { GetProductQuery } from './queries/get-product.query';
 import { GetBrandsQuery } from './queries/get-brands.query';
 import { GetAttributesQuery } from './queries/get-attributes.query';
 import { GetVariantsQuery } from './queries/get-variants.query';
-import { CreateProductDto, GetProductsFilterDto, UpdateProductDto } from './dto/product.dto';
+import {
+	CreateProductDto,
+	GetProductsFilterDto,
+	UpdateProductDto,
+} from './dto/product.dto';
 import { CreateBrandDto, UpdateBrandDto } from './dto/brand.dto';
 import { CreateAttributeDto, UpdateAttributeDto } from './dto/attribute.dto';
-import { AdjustStockDto, CreateVariantDto, UpdateVariantDto } from './dto/product-variant.dto';
+import {
+	AdjustStockDto,
+	CreateVariantDto,
+	UpdateVariantDto,
+} from './dto/product-variant.dto';
 
 @Controller()
 export class ProductController {
@@ -39,18 +47,20 @@ export class ProductController {
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.GET_PRODUCTS })
 	async getProducts(@Payload() payload: GetProductsFilterDto) {
-		return this.queryBus.execute(new GetProductsQuery(
-			payload?.page || 1,
-			payload?.limit || 20,
-			payload?.sortBy || 'createdAt',
-			payload?.sortOrder || 'DESC',
-			payload?.categoryId,
-			payload?.brandId,
-			payload?.minPrice,
-			payload?.maxPrice,
-			payload?.isActive,
-			payload?.search,
-		));
+		return this.queryBus.execute(
+			new GetProductsQuery(
+				payload?.page || 1,
+				payload?.limit || 20,
+				payload?.sortBy || 'createdAt',
+				payload?.sortOrder || 'DESC',
+				payload?.categoryId,
+				payload?.brandId,
+				payload?.minPrice,
+				payload?.maxPrice,
+				payload?.isActive,
+				payload?.search,
+			),
+		);
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.GET_PRODUCT })
@@ -59,8 +69,12 @@ export class ProductController {
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.UPDATE_PRODUCT })
-	async updateProduct(@Payload() payload: { id: string; dto: UpdateProductDto }) {
-		return this.commandBus.execute(new UpdateProductCommand(payload.id, payload.dto));
+	async updateProduct(
+		@Payload() payload: { id: string; dto: UpdateProductDto },
+	) {
+		return this.commandBus.execute(
+			new UpdateProductCommand(payload.id, payload.dto),
+		);
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.DELETE_PRODUCT })
@@ -85,7 +99,9 @@ export class ProductController {
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.UPDATE_BRAND })
 	async updateBrand(@Payload() payload: { id: string; dto: UpdateBrandDto }) {
-		return this.commandBus.execute(new UpdateBrandCommand(payload.id, payload.dto));
+		return this.commandBus.execute(
+			new UpdateBrandCommand(payload.id, payload.dto),
+		);
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.DELETE_BRAND })
@@ -104,8 +120,12 @@ export class ProductController {
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.UPDATE_ATTRIBUTE })
-	async updateAttribute(@Payload() payload: { id: string; dto: UpdateAttributeDto }) {
-		return this.commandBus.execute(new UpdateAttributeCommand(payload.id, payload.dto));
+	async updateAttribute(
+		@Payload() payload: { id: string; dto: UpdateAttributeDto },
+	) {
+		return this.commandBus.execute(
+			new UpdateAttributeCommand(payload.id, payload.dto),
+		);
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.DELETE_ATTRIBUTE })
@@ -124,8 +144,12 @@ export class ProductController {
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.UPDATE_VARIANT })
-	async updateVariant(@Payload() payload: { id: string; dto: UpdateVariantDto }) {
-		return this.commandBus.execute(new UpdateVariantCommand(payload.id, payload.dto));
+	async updateVariant(
+		@Payload() payload: { id: string; dto: UpdateVariantDto },
+	) {
+		return this.commandBus.execute(
+			new UpdateVariantCommand(payload.id, payload.dto),
+		);
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.DELETE_VARIANT })

@@ -7,7 +7,8 @@ import { Voucher } from '../../entities/voucher.entity';
 @QueryHandler(GetAvailableVouchersQuery)
 export class GetAvailableVouchersHandler implements IQueryHandler<GetAvailableVouchersQuery> {
 	constructor(
-		@InjectRepository(Voucher) private readonly voucherRepository: Repository<Voucher>,
+		@InjectRepository(Voucher)
+		private readonly voucherRepository: Repository<Voucher>,
 	) {}
 
 	async execute() {
@@ -15,6 +16,8 @@ export class GetAvailableVouchersHandler implements IQueryHandler<GetAvailableVo
 			where: { expiresAt: MoreThan(new Date()) },
 			order: { createdAt: 'DESC' },
 		});
-		return vouchers.filter((voucher) => voucher.usageCount < voucher.usageLimit);
+		return vouchers.filter(
+			(voucher) => voucher.usageCount < voucher.usageLimit,
+		);
 	}
 }

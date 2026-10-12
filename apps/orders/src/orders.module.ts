@@ -30,7 +30,11 @@ export const CommandHandlers = [
 	ApproveRefundHandler,
 	RejectRefundHandler,
 ];
-export const QueryHandlers = [GetOrdersHandler, GetOrderHandler, GetRefundsHandler];
+export const QueryHandlers = [
+	GetOrdersHandler,
+	GetOrderHandler,
+	GetRefundsHandler,
+];
 export const EventHandlers = [OrderCreatedHandler];
 
 @Module({

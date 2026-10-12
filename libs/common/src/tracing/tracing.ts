@@ -6,37 +6,38 @@ import { ATTR_SERVICE_NAME } from '@opentelemetry/semantic-conventions';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 
 export function setupTracing(serviceName: string, metricsPort: number) {
-  const exporter = new OTLPTraceExporter({
-    // Jaeger default OTLP HTTP port
-    url: 'http://localhost:4318/v1/traces',
-  });
+	const exporter = new OTLPTraceExporter({
+		// Jaeger default OTLP HTTP port
+		url: 'http://localhost:4318/v1/traces',
+	});
 
-  const prometheusExporter = new PrometheusExporter({
-    port: metricsPort,
-  });
+	const prometheusExporter = new PrometheusExporter({
+		port: metricsPort,
+	});
 
-  const sdk = new NodeSDK({
-    resource: resourceFromAttributes({
-      [ATTR_SERVICE_NAME]: serviceName,
-    }),
-    traceExporter: exporter,
-    metricReader: prometheusExporter,
-    instrumentations: [
-      getNodeAutoInstrumentations({
-        // Tắt mặc định trong auto-instrumentations; bật để có metrics process.* và system.* (CPU, RAM, network)
-        '@opentelemetry/instrumentation-host-metrics': { enabled: true },
-      }),
-    ],
-  });
+	const sdk = new NodeSDK({
+		resource: resourceFromAttributes({
+			[ATTR_SERVICE_NAME]: serviceName,
+		}),
+		traceExporter: exporter,
+		metricReader: prometheusExporter,
+		instrumentations: [
+			getNodeAutoInstrumentations({
+				// Tắt mặc định trong auto-instrumentations; bật để có metrics process.* và system.* (CPU, RAM, network)
+				'@opentelemetry/instrumentation-host-metrics': { enabled: true },
+			}),
+		],
+	});
 
-  sdk.start();
+	sdk.start();
 
-  process.on('SIGTERM', () => {
-    sdk.shutdown()
-      .then(() => console.log('Tracing terminated'))
-      .catch((error) => console.log('Error terminating tracing', error))
-      .finally(() => process.exit(0));
-  });
+	process.on('SIGTERM', () => {
+		sdk
+			.shutdown()
+			.then(() => console.log('Tracing terminated'))
+			.catch((error) => console.log('Error terminating tracing', error))
+			.finally(() => process.exit(0));
+	});
 
-  return sdk;
+	return sdk;
 }

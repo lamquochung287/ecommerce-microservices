@@ -9,7 +9,10 @@ import { OrderItem } from '../../entities/order-item.entity';
 import { Outbox } from '../../entities/outbox.entity';
 import { Refund } from '../../entities/refund.entity';
 import { CreateOrderDto } from '../../dto/order.dto';
-import { InventoryReservationService, ReservationItem } from '../../saga/inventory-reservation.service';
+import {
+	InventoryReservationService,
+	ReservationItem,
+} from '../../saga/inventory-reservation.service';
 import { PaymentProvider } from '../../saga/payment-provider.interface';
 
 const dataSource = new DataSource({
@@ -32,7 +35,13 @@ const baseDto: CreateOrderDto = {
 		city: 'HCMC',
 		country: 'VN',
 	},
-	items: [{ productId: '22222222-2222-2222-2222-222222222222', quantity: 2, unitPrice: 100 }],
+	items: [
+		{
+			productId: '22222222-2222-2222-2222-222222222222',
+			quantity: 2,
+			unitPrice: 100,
+		},
+	],
 };
 
 function fakeConfigService(): ConfigService {
@@ -58,7 +67,10 @@ describe('CreateOrderHandler (saga)', () => {
 		const inventory: Partial<InventoryReservationService> = {
 			reserve: jest.fn(async (items) => {
 				reserveCalls.push(items);
-				throw new RpcException({ statusCode: 409, message: 'Không đủ tồn kho' });
+				throw new RpcException({
+					statusCode: 409,
+					message: 'Không đủ tồn kho',
+				});
 			}),
 			release: jest.fn(async (items) => {
 				releaseCalls.push(items);
@@ -73,13 +85,17 @@ describe('CreateOrderHandler (saga)', () => {
 			paymentProvider,
 		);
 
-		await expect(handler.execute(new CreateOrderCommand(baseDto))).rejects.toThrow();
+		await expect(
+			handler.execute(new CreateOrderCommand(baseDto)),
+		).rejects.toThrow();
 
 		expect(reserveCalls.length).toBe(1);
 		expect(releaseCalls.length).toBe(0); // chưa reserve được gì thì không cần compensate
 		expect(paymentProvider.capture).not.toHaveBeenCalled();
 
-		const orders = await dataSource.getRepository(Order).find({ where: { userId: baseDto.userId } });
+		const orders = await dataSource
+			.getRepository(Order)
+			.find({ where: { userId: baseDto.userId } });
 		expect(orders.length).toBe(0);
 	});
 
@@ -95,7 +111,10 @@ describe('CreateOrderHandler (saga)', () => {
 			}),
 		};
 		const paymentProvider: PaymentProvider = {
-			capture: jest.fn(async () => ({ success: false, failureReason: 'insufficient funds (test)' })),
+			capture: jest.fn(async () => ({
+				success: false,
+				failureReason: 'insufficient funds (test)',
+			})),
 		};
 
 		const handler = new CreateOrderHandler(
@@ -105,13 +124,22 @@ describe('CreateOrderHandler (saga)', () => {
 			paymentProvider,
 		);
 
-		await expect(handler.execute(new CreateOrderCommand(baseDto))).rejects.toThrow(RpcException);
+		await expect(
+			handler.execute(new CreateOrderCommand(baseDto)),
+		).rejects.toThrow(RpcException);
 
 		expect(reserveCalls.length).toBe(1);
 		expect(releaseCalls.length).toBe(1); // compensation phải release đúng item đã reserve
-		expect(releaseCalls[0]).toEqual([{ productId: baseDto.items[0].productId, quantity: baseDto.items[0].quantity }]);
+		expect(releaseCalls[0]).toEqual([
+			{
+				productId: baseDto.items[0].productId,
+				quantity: baseDto.items[0].quantity,
+			},
+		]);
 
-		const orders = await dataSource.getRepository(Order).find({ where: { userId: baseDto.userId } });
+		const orders = await dataSource
+			.getRepository(Order)
+			.find({ where: { userId: baseDto.userId } });
 		expect(orders.length).toBe(1);
 		expect(orders[0].status).toBe(OrderStatus.CANCELLED);
 	});
@@ -138,8 +166,12 @@ describe('CreateOrderHandler (saga)', () => {
 		expect(result!.status).toBe(OrderStatus.PROCESSING);
 		expect(Number(result!.subtotal)).toBe(200);
 
-		const outboxEvents = await dataSource.getRepository(Outbox).find({ where: { eventType: 'order.created' } });
-		const matching = outboxEvents.find((e) => (e.payload as any).orderId === result!.id);
+		const outboxEvents = await dataSource
+			.getRepository(Outbox)
+			.find({ where: { eventType: 'order.created' } });
+		const matching = outboxEvents.find(
+			(e) => (e.payload as any).orderId === result!.id,
+		);
 		expect(matching).toBeDefined();
 	});
 });

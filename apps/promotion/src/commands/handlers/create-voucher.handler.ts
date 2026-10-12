@@ -7,7 +7,8 @@ import { Voucher } from '../../entities/voucher.entity';
 @CommandHandler(CreateVoucherCommand)
 export class CreateVoucherHandler implements ICommandHandler<CreateVoucherCommand> {
 	constructor(
-		@InjectRepository(Voucher) private readonly voucherRepository: Repository<Voucher>,
+		@InjectRepository(Voucher)
+		private readonly voucherRepository: Repository<Voucher>,
 	) {}
 
 	async execute(command: CreateVoucherCommand) {

@@ -7,7 +7,8 @@ import { Brand } from '../../entities/brand.entity';
 @QueryHandler(GetBrandsQuery)
 export class GetBrandsHandler implements IQueryHandler<GetBrandsQuery> {
 	constructor(
-		@InjectRepository(Brand) private readonly brandRepository: Repository<Brand>,
+		@InjectRepository(Brand)
+		private readonly brandRepository: Repository<Brand>,
 	) {}
 
 	async execute() {

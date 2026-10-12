@@ -1,4 +1,12 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import {
+	Entity,
+	PrimaryGeneratedColumn,
+	Column,
+	ManyToOne,
+	JoinColumn,
+	CreateDateColumn,
+	UpdateDateColumn,
+} from 'typeorm';
 import { User } from './user.entity';
 
 @Entity('addresses')

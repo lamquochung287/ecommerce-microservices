@@ -42,16 +42,26 @@ describe('AddressService default address exclusivity', () => {
 	});
 
 	afterAll(async () => {
-		await dataSource.getRepository(Address).delete({ user: { id: testUser.id } });
+		await dataSource
+			.getRepository(Address)
+			.delete({ user: { id: testUser.id } });
 		await dataSource.getRepository(User).delete({ id: testUser.id });
 		await dataSource.destroy();
 	});
 
 	it('set default address mới -> address cũ tự động isDefault = false', async () => {
-		const first = await addressService.createAddress({ ...baseAddress, userId: testUser.userId, isDefault: true });
+		const first = await addressService.createAddress({
+			...baseAddress,
+			userId: testUser.userId,
+			isDefault: true,
+		});
 		expect(first.isDefault).toBe(true);
 
-		const second = await addressService.createAddress({ ...baseAddress, userId: testUser.userId, isDefault: true });
+		const second = await addressService.createAddress({
+			...baseAddress,
+			userId: testUser.userId,
+			isDefault: true,
+		});
 		expect(second.isDefault).toBe(true);
 
 		const addresses = await addressService.getAddresses(testUser.userId);
@@ -63,8 +73,15 @@ describe('AddressService default address exclusivity', () => {
 	});
 
 	it('setDefaultAddress chuyển default sang address chỉ định, unset address khác', async () => {
-		const a1 = await addressService.createAddress({ ...baseAddress, userId: testUser.userId });
-		const a2 = await addressService.createAddress({ ...baseAddress, userId: testUser.userId, isDefault: true });
+		const a1 = await addressService.createAddress({
+			...baseAddress,
+			userId: testUser.userId,
+		});
+		const a2 = await addressService.createAddress({
+			...baseAddress,
+			userId: testUser.userId,
+			isDefault: true,
+		});
 
 		await addressService.setDefaultAddress(a1.id);
 

@@ -1,4 +1,9 @@
-import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
+import {
+	Injectable,
+	CanActivate,
+	ExecutionContext,
+	ForbiddenException,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { PERMISSION_KEY } from '../decorator/require-permission.decorator';
 
@@ -7,11 +12,11 @@ export class PermissionGuard implements CanActivate {
 	constructor(private reflector: Reflector) {}
 
 	canActivate(context: ExecutionContext): boolean {
-		const requiredPermission = this.reflector.getAllAndOverride<number>(PERMISSION_KEY, [
-			context.getHandler(),
-			context.getClass(),
-		]);
-		
+		const requiredPermission = this.reflector.getAllAndOverride<number>(
+			PERMISSION_KEY,
+			[context.getHandler(), context.getClass()],
+		);
+
 		if (requiredPermission === undefined || requiredPermission === null) {
 			return true; // No permission required
 		}
@@ -26,10 +31,13 @@ export class PermissionGuard implements CanActivate {
 
 		// Check if user has ALL required bits
 		// (userPermissions & requiredPermission) === requiredPermission
-		const hasPermission = (userPermissions & requiredPermission) === requiredPermission;
+		const hasPermission =
+			(userPermissions & requiredPermission) === requiredPermission;
 
 		if (!hasPermission) {
-			throw new ForbiddenException('You do not have permission to perform this action');
+			throw new ForbiddenException(
+				'You do not have permission to perform this action',
+			);
 		}
 
 		return true;

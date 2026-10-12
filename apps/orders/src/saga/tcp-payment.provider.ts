@@ -13,9 +13,15 @@ const TCP_TIMEOUT_MS = 10000;
 export class TcpPaymentProvider implements PaymentProvider {
 	private readonly logger = new Logger(TcpPaymentProvider.name);
 
-	constructor(@Inject(PAYMENT_TCP_CLIENT) private readonly paymentClient: ClientProxy) {}
+	constructor(
+		@Inject(PAYMENT_TCP_CLIENT) private readonly paymentClient: ClientProxy,
+	) {}
 
-	async capture(orderId: string, amount: number, idempotencyKey: string): Promise<CaptureResult> {
+	async capture(
+		orderId: string,
+		amount: number,
+		idempotencyKey: string,
+	): Promise<CaptureResult> {
 		try {
 			return await firstValueFrom(
 				this.paymentClient
@@ -26,7 +32,9 @@ export class TcpPaymentProvider implements PaymentProvider {
 					.pipe(timeout(TCP_TIMEOUT_MS)),
 			);
 		} catch (error) {
-			this.logger.error(`Payment capture failed for orderId=${orderId}: ${error?.message ?? error}`);
+			this.logger.error(
+				`Payment capture failed for orderId=${orderId}: ${error?.message ?? error}`,
+			);
 			return { success: false, failureReason: 'Payment service unavailable' };
 		}
 	}

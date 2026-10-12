@@ -16,7 +16,9 @@ export interface ReservationItem {
 export class InventoryReservationService {
 	private readonly logger = new Logger(InventoryReservationService.name);
 
-	constructor(@Inject(PRODUCT_TCP_CLIENT) private readonly productClient: ClientProxy) {}
+	constructor(
+		@Inject(PRODUCT_TCP_CLIENT) private readonly productClient: ClientProxy,
+	) {}
 
 	// Trừ kho cho từng item. Nếu 1 item fail giữa chừng, release các item đã trừ thành công trước đó rồi throw lại lỗi gốc.
 	async reserve(items: ReservationItem[]): Promise<void> {
@@ -50,7 +52,10 @@ export class InventoryReservationService {
 	private adjustStock(productId: string, delta: number) {
 		return firstValueFrom(
 			this.productClient
-				.send({ cmd: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK }, { productId, delta })
+				.send(
+					{ cmd: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK },
+					{ productId, delta },
+				)
 				.pipe(timeout(TCP_TIMEOUT_MS)),
 		);
 	}

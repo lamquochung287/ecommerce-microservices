@@ -6,8 +6,8 @@ import { OrdersService } from './orders.service';
 import { ProductModule } from '../product/product.module';
 
 @Module({
-  imports: [ProductModule],
-  controllers: [OrdersController, RefundController, CartController],
-  providers: [OrdersService],
+	imports: [ProductModule],
+	controllers: [OrdersController, RefundController, CartController],
+	providers: [OrdersService],
 })
 export class OrdersModule {}

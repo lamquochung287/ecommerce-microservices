@@ -15,8 +15,14 @@ import { MINIO_CLIENT, MEDIA_BUCKET } from './media.constant';
 					endPoint: configService.get<string>('MINIO_ENDPOINT', 'localhost'),
 					port: configService.get<number>('MINIO_PORT', 9000),
 					useSSL: false,
-					accessKey: configService.get<string>('MINIO_ACCESS_KEY', 'minioadmin'),
-					secretKey: configService.get<string>('MINIO_SECRET_KEY', 'minioadmin'),
+					accessKey: configService.get<string>(
+						'MINIO_ACCESS_KEY',
+						'minioadmin',
+					),
+					secretKey: configService.get<string>(
+						'MINIO_SECRET_KEY',
+						'minioadmin',
+					),
 				});
 			},
 			inject: [ConfigService],

@@ -19,6 +19,8 @@ async function bootstrap() {
 	);
 	app.enableShutdownHooks();
 	await app.listen();
-	console.log(`Order microservice is running on port ${PORT_TCP.ORDER_TCP_PORT}`);
+	console.log(
+		`Order microservice is running on port ${PORT_TCP.ORDER_TCP_PORT}`,
+	);
 }
 bootstrap().catch((err) => console.error(err));

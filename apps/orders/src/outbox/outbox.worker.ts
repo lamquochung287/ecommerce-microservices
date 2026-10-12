@@ -16,9 +16,11 @@ export class OutboxWorker {
 	private readonly subscribers: ClientProxy[];
 
 	constructor(
-		@InjectRepository(Outbox) private readonly outboxRepository: Repository<Outbox>,
+		@InjectRepository(Outbox)
+		private readonly outboxRepository: Repository<Outbox>,
 		@Inject(ORDER_TCP_CLIENT) private readonly client: ClientProxy,
-		@Inject(NOTIFICATION_TCP_CLIENT) private readonly notificationClient: ClientProxy,
+		@Inject(NOTIFICATION_TCP_CLIENT)
+		private readonly notificationClient: ClientProxy,
 	) {
 		// TCP transport của NestJS là point-to-point (không broadcast) — mỗi subscriber cần emit riêng.
 		// Thêm subscriber mới (vd Review khi cần biết OrderDelivered) thì bổ sung ClientProxy vào đây.
@@ -59,14 +61,20 @@ export class OutboxWorker {
 			event.status = OutboxStatus.PUBLISHED;
 			event.publishedAt = new Date();
 			await this.outboxRepository.save(event);
-			this.logger.log(`Published outbox event ${event.id} (${event.eventType})`);
+			this.logger.log(
+				`Published outbox event ${event.id} (${event.eventType})`,
+			);
 		} catch (err) {
 			event.retryCount += 1;
 			if (event.retryCount >= MAX_RETRY) {
 				event.status = OutboxStatus.FAILED;
-				this.logger.error(`Outbox event ${event.id} failed permanently after ${MAX_RETRY} retries: ${err.message}`);
+				this.logger.error(
+					`Outbox event ${event.id} failed permanently after ${MAX_RETRY} retries: ${err.message}`,
+				);
 			} else {
-				this.logger.warn(`Outbox event ${event.id} publish failed (retry ${event.retryCount}/${MAX_RETRY}): ${err.message}`);
+				this.logger.warn(
+					`Outbox event ${event.id} publish failed (retry ${event.retryCount}/${MAX_RETRY}): ${err.message}`,
+				);
 			}
 			await this.outboxRepository.save(event);
 		}

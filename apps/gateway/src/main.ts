@@ -19,7 +19,10 @@ async function bootstrap() {
 	app.use(compression());
 
 	// CORS origin đọc từ .env (CORS_ORIGINS, phân tách bởi dấu phẩy) thay vì mở toàn bộ (*) như trước.
-	const corsOrigins = configService.get<string>('CORS_ORIGINS', 'http://localhost:3000');
+	const corsOrigins = configService.get<string>(
+		'CORS_ORIGINS',
+		'http://localhost:3000',
+	);
 	app.enableCors({
 		origin: corsOrigins.split(',').map((origin) => origin.trim()),
 		credentials: true,
@@ -29,7 +32,7 @@ async function bootstrap() {
 		new ValidationPipe({
 			whitelist: true,
 			forbidNonWhitelisted: true,
-			transform: true
+			transform: true,
 		}),
 	);
 	app.useGlobalFilters(new HttpExceptionFilter());
@@ -40,11 +43,14 @@ async function bootstrap() {
 		.setDescription('API Gateway cho hệ thống ecommerce microservices')
 		.setVersion('1.0')
 		.addBearerAuth()
+		// Mọi route (trừ /health) bắt buộc header x-api-key — xem RequestTrackerMiddleware.
+		.addApiKey({ type: 'apiKey', name: 'x-api-key', in: 'header' }, 'api-key')
+		.addSecurityRequirements('api-key')
 		.build();
 	const swaggerDocument = SwaggerModule.createDocument(app, swaggerConfig);
 	SwaggerModule.setup('api/docs', app, swaggerDocument);
 
-	const port = configService.get<number>('PORT', 3000);
+	const port = configService.get<number>('GATEWAY_PORT', 3000);
 	await app.listen(port, () => {
 		console.log(`Gateway is running on port ${port}`);
 		console.log(`Swagger docs available at http://localhost:${port}/api/docs`);

@@ -8,29 +8,38 @@ import { CreateReviewDto } from '../../../review/src/dto/review.dto';
 
 @Injectable()
 export class ReviewService {
-  constructor(
-    @Inject(NAME_SERVICE_TCP.REVIEW_SERVICE) private readonly reviewClient: ClientProxy,
-    private readonly tcpResilience: TcpResilienceService,
-  ) {}
+	constructor(
+		@Inject(NAME_SERVICE_TCP.REVIEW_SERVICE)
+		private readonly reviewClient: ClientProxy,
+		private readonly tcpResilience: TcpResilienceService,
+	) {}
 
-  private async send(cmd: string, payload: unknown, action: string) {
-    try {
-      return await this.tcpResilience.send(
-        NAME_SERVICE_TCP.REVIEW_SERVICE,
-        this.reviewClient,
-        { cmd },
-        payload,
-      );
-    } catch (error) {
-      MicroserviceErrorHandler.handleError(error, action, 'Review service');
-    }
-  }
+	private async send(cmd: string, payload: unknown, action: string) {
+		try {
+			return await this.tcpResilience.send(
+				NAME_SERVICE_TCP.REVIEW_SERVICE,
+				this.reviewClient,
+				{ cmd },
+				payload,
+			);
+		} catch (error) {
+			MicroserviceErrorHandler.handleError(error, action, 'Review service');
+		}
+	}
 
-  createReview(dto: CreateReviewDto) {
-    return this.send(REVIEW_MESSAGE_PATTERN.CREATE_REVIEW, dto, 'create review');
-  }
+	createReview(dto: CreateReviewDto) {
+		return this.send(
+			REVIEW_MESSAGE_PATTERN.CREATE_REVIEW,
+			dto,
+			'create review',
+		);
+	}
 
-  getReviewsByProduct(productId: string) {
-    return this.send(REVIEW_MESSAGE_PATTERN.GET_REVIEWS_BY_PRODUCT, { productId }, 'get reviews by product');
-  }
+	getReviewsByProduct(productId: string) {
+		return this.send(
+			REVIEW_MESSAGE_PATTERN.GET_REVIEWS_BY_PRODUCT,
+			{ productId },
+			'get reviews by product',
+		);
+	}
 }

@@ -37,7 +37,9 @@ describe('RoleService.getEffectivePermissions', () => {
 	});
 
 	afterAll(async () => {
-		await dataSource.getRepository(UserRole).delete({ user: { id: testUser.id } });
+		await dataSource
+			.getRepository(UserRole)
+			.delete({ user: { id: testUser.id } });
 		await dataSource.getRepository(User).delete({ id: testUser.id });
 		await dataSource.destroy();
 	});
@@ -57,16 +59,27 @@ describe('RoleService.getEffectivePermissions', () => {
 			permissions: ModuleName.ORDER | Action.CREATE,
 		});
 
-		await roleService.assignRole({ userId: testUser.userId, roleId: readOnlyRole.id });
-		await roleService.assignRole({ userId: testUser.userId, roleId: writeRole.id });
+		await roleService.assignRole({
+			userId: testUser.userId,
+			roleId: readOnlyRole.id,
+		});
+		await roleService.assignRole({
+			userId: testUser.userId,
+			roleId: writeRole.id,
+		});
 
 		const effective = await roleService.getEffectivePermissions(testUser.id);
-		const expected = (ModuleName.PRODUCT | Action.READ) | (ModuleName.ORDER | Action.CREATE);
+		const expected =
+			ModuleName.PRODUCT | Action.READ | (ModuleName.ORDER | Action.CREATE);
 		expect(effective).toBe(expected);
 
 		// Verify từng quyền riêng lẻ đều pass check bitmask
-		expect((effective! & (ModuleName.PRODUCT | Action.READ))).toBe(ModuleName.PRODUCT | Action.READ);
-		expect((effective! & (ModuleName.ORDER | Action.CREATE))).toBe(ModuleName.ORDER | Action.CREATE);
+		expect(effective! & (ModuleName.PRODUCT | Action.READ)).toBe(
+			ModuleName.PRODUCT | Action.READ,
+		);
+		expect(effective! & (ModuleName.ORDER | Action.CREATE)).toBe(
+			ModuleName.ORDER | Action.CREATE,
+		);
 
 		await roleService.deleteRole(readOnlyRole.id);
 		await roleService.deleteRole(writeRole.id);

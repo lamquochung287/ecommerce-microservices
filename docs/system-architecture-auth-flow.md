@@ -1,6 +1,6 @@
 # System Architecture — Authentication & Authorization Flow
 
-**Ngày cập nhật**: 2026-09-28
+**Ngày cập nhật**: 2026-10-05
 
 Tài liệu con của [system-architecture.md](./system-architecture.md). Mô tả chi tiết flow đăng nhập, xác thực JWT trên mỗi request, refresh token, và đăng xuất.
 
@@ -95,7 +95,7 @@ Tài liệu con của [system-architecture.md](./system-architecture.md). Mô t�
 └────────────────────────────────────────────────────┘
 ```
 
-> **Lưu ý quan trọng**: trong code hiện tại của `UserController`, **chưa tìm thấy** message pattern riêng cho "refresh access token" — chỉ có `LOGIN_USER`, `LOGOUT_USER`, `VERIFY_TOKEN`. Sơ đồ refresh ở trên mô tả flow *dự kiến* theo thiết kế 2-token (access+refresh), nhưng cần xác nhận thêm việc renew access token phía client hiện đang gọi endpoint nào. Xem [project-roadmap.md](./project-roadmap.md) mục gap liên quan.
+> **Xác nhận (2026-10-05)**: Gateway và `UserController` **không có** endpoint/pattern refresh — chỉ có `REGISTER_USER`, `LOGIN_USER`, `LOGOUT_USER`, `VERIFY_TOKEN`, `GET_USER_INFO`, `UPDATE_AVATAR`. Hết hạn access token (15 phút) = phải login lại. Cũng lưu ý logout hiện nhận `userId/sessionId` từ body, không từ JWT (xem [design-trade-offs.md §5-R4](./design-trade-offs.md#5-rủi-ro--gap-đã-xác-minh-trong-code)). Ghi chú cũ bên dưới giữ lại để tham khảo: trong code hiện tại của `UserController`, **chưa tìm thấy** message pattern riêng cho "refresh access token" — chỉ có `LOGIN_USER`, `LOGOUT_USER`, `VERIFY_TOKEN`. Sơ đồ refresh ở trên mô tả flow *dự kiến* theo thiết kế 2-token (access+refresh), nhưng cần xác nhận thêm việc renew access token phía client hiện đang gọi endpoint nào. Xem [project-roadmap.md](./project-roadmap.md) mục gap liên quan.
 
 ### 4. Logout Flow
 
@@ -104,12 +104,11 @@ Tài liệu con của [system-architecture.md](./system-architecture.md). Mô t�
 │      Logout Flow                                   │
 ├────────────────────────────────────────────────────┤
 │                                                    │
-│ 1. POST /user/logout                              │
-│    Headers: Authorization: Bearer {accessToken}   │
+│ 1. POST /user/logout  (Gateway KHÔNG có guard)    │
+│    Body: { userId, sessionId }  (client tự gửi)   │
 │                                                    │
-│ 2. USER SERVICE                                   │
-│    ├─ Decode accessToken                          │
-│    ├─ Lấy: { userId, sessionId }                  │
+│ 2. USER SERVICE (LOGOUT_USER)                     │
+│    ├─ Nhận { userId, sessionId } từ body          │
 │    ├─ Xoá: refresh_token:{userId}:{sessionId}     │
 │    └─ Trả về: { success: true }                   │
 │                                                    │

@@ -19,7 +19,11 @@ describe('OrdersController', () => {
 				{
 					provide: QueryBus,
 					useValue: {
-						execute: jest.fn().mockResolvedValue([{ id: 1, userId: 1, productId: 1, quantity: 2 }]),
+						execute: jest
+							.fn()
+							.mockResolvedValue([
+								{ id: 1, userId: 1, productId: 1, quantity: 2 },
+							]),
 					},
 				},
 			],

@@ -79,7 +79,7 @@ Các service:
 - **Redis**: localhost:6379
 - **Jaeger UI**: http://localhost:16686
 - **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3005 (mặc định: admin/admin) — dashboard "Ecommerce - Server Overview" được provision sẵn từ `grafana/`
+- **Grafana**: http://localhost:3100 (mặc định: admin/admin) — dashboard "Ecommerce - Server Overview" được provision sẵn từ `grafana/`
 - **MinIO Console**: http://localhost:9001 (mặc định: minioadmin/minioadmin)
 
 ### 3. Chạy Migration
@@ -193,7 +193,7 @@ npm run test:cov
    ├─ MinIO (:9000) — File storage tương thích S3
    ├─ Jaeger (:16686) — Distributed tracing
    ├─ Prometheus (:9090) — Metrics
-   └─ Grafana (:3005) — Dashboard
+   └─ Grafana (:3100) — Dashboard
 ```
 
 ### Flow chính

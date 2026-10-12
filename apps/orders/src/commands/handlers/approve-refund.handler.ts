@@ -14,12 +14,21 @@ export class ApproveRefundHandler implements ICommandHandler<ApproveRefundComman
 		const { id } = command;
 
 		return this.dataSource.transaction(async (manager) => {
-			const refund = await manager.findOne(Refund, { where: { id }, relations: ['order', 'order.refunds'] });
+			const refund = await manager.findOne(Refund, {
+				where: { id },
+				relations: ['order', 'order.refunds'],
+			});
 			if (!refund) {
-				throw new RpcException({ statusCode: 404, message: 'Refund not found' });
+				throw new RpcException({
+					statusCode: 404,
+					message: 'Refund not found',
+				});
 			}
 			if (refund.status !== RefundStatus.PENDING) {
-				throw new RpcException({ statusCode: 400, message: `Refund đang ở trạng thái ${refund.status}, không thể approve` });
+				throw new RpcException({
+					statusCode: 400,
+					message: `Refund đang ở trạng thái ${refund.status}, không thể approve`,
+				});
 			}
 
 			refund.status = RefundStatus.COMPLETED;
@@ -27,11 +36,20 @@ export class ApproveRefundHandler implements ICommandHandler<ApproveRefundComman
 
 			const order = refund.order;
 			const totalRefunded = (order.refunds ?? [])
-				.filter((r) => r.id === refund.id || r.status === RefundStatus.COMPLETED)
-				.reduce((sum, r) => sum + Number(r.id === refund.id ? refund.amount : r.amount), 0);
+				.filter(
+					(r) => r.id === refund.id || r.status === RefundStatus.COMPLETED,
+				)
+				.reduce(
+					(sum, r) =>
+						sum + Number(r.id === refund.id ? refund.amount : r.amount),
+					0,
+				);
 
 			// Full refund -> chuyển Order sang REFUNDED nếu transition hợp lệ từ state hiện tại (DELIVERED -> REFUNDED).
-			if (totalRefunded >= Number(order.totalAmount) && canTransition(order.status, OrderStatus.REFUNDED)) {
+			if (
+				totalRefunded >= Number(order.totalAmount) &&
+				canTransition(order.status, OrderStatus.REFUNDED)
+			) {
 				await manager.update(Order, order.id, { status: OrderStatus.REFUNDED });
 			}
 

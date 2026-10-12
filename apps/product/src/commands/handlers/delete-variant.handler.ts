@@ -8,7 +8,8 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(DeleteVariantCommand)
 export class DeleteVariantHandler implements ICommandHandler<DeleteVariantCommand> {
 	constructor(
-		@InjectRepository(ProductVariant) private readonly variantRepository: Repository<ProductVariant>,
+		@InjectRepository(ProductVariant)
+		private readonly variantRepository: Repository<ProductVariant>,
 	) {}
 
 	async execute(command: DeleteVariantCommand) {

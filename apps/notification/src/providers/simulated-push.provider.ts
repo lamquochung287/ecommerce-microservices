@@ -8,7 +8,9 @@ export class SimulatedPushProvider implements PushProvider {
 	private readonly logger = new Logger(SimulatedPushProvider.name);
 
 	async send(to: string, title: string, body: string): Promise<SendResult> {
-		this.logger.log(`[SIMULATED PUSH] to=${to} title="${title}" body="${body}"`);
+		this.logger.log(
+			`[SIMULATED PUSH] to=${to} title="${title}" body="${body}"`,
+		);
 		return { success: true };
 	}
 }

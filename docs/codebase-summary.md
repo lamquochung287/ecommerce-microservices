@@ -319,7 +319,7 @@ Services (all on localhost):
 - **Redis 7**: cache:6379
 - **Jaeger**: 16686 (UI), 4317 (gRPC OTLP), 4318 (HTTP OTLP)
 - **Prometheus**: prometheus:9090
-- **Grafana**: grafana:3005 (maps to 3000 inside container)
+- **Grafana**: grafana:3100 (maps to 3000 inside container)
 - **MinIO**: minio:9000 (API), 9001 (console, default login minioadmin/minioadmin)
 
 ### NestJS App Ports

@@ -19,7 +19,9 @@ describe('ProductController', () => {
 				{
 					provide: QueryBus,
 					useValue: {
-						execute: jest.fn().mockResolvedValue([{ id: 1, name: 'Product 1', price: 100 }]),
+						execute: jest
+							.fn()
+							.mockResolvedValue([{ id: 1, name: 'Product 1', price: 100 }]),
 					},
 				},
 			],

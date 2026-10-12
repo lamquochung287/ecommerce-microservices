@@ -7,7 +7,8 @@ import { Voucher } from '../../entities/voucher.entity';
 @QueryHandler(GetVouchersQuery)
 export class GetVouchersHandler implements IQueryHandler<GetVouchersQuery> {
 	constructor(
-		@InjectRepository(Voucher) private readonly voucherRepository: Repository<Voucher>,
+		@InjectRepository(Voucher)
+		private readonly voucherRepository: Repository<Voucher>,
 	) {}
 
 	async execute() {

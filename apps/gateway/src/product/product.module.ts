@@ -5,11 +5,15 @@ import { AttributeController } from './attribute.controller';
 import { VariantController } from './variant.controller';
 import { ProductService } from './product.service';
 
-
 @Module({
-  imports: [],
-  controllers: [ProductController, BrandController, AttributeController, VariantController],
-  providers: [ProductService],
-  exports: [ProductService],
+	imports: [],
+	controllers: [
+		ProductController,
+		BrandController,
+		AttributeController,
+		VariantController,
+	],
+	providers: [ProductService],
+	exports: [ProductService],
 })
 export class ProductModule {}

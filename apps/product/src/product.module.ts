@@ -60,15 +60,18 @@ export const EventHandlers = [ProductCreatedHandler];
 	imports: [
 		CommonConfigModule,
 		DatabaseModule,
-		TypeOrmModule.forFeature([Product, Category, Brand, Attribute, AttributeValue, ProductVariant]),
+		TypeOrmModule.forFeature([
+			Product,
+			Category,
+			Brand,
+			Attribute,
+			AttributeValue,
+			ProductVariant,
+		]),
 		CqrsModule,
 		HealthModule,
 	],
 	controllers: [ProductController],
-	providers: [
-		...CommandHandlers,
-		...QueryHandlers,
-		...EventHandlers,
-	],
+	providers: [...CommandHandlers, ...QueryHandlers, ...EventHandlers],
 })
 export class ProductModule {}

@@ -9,7 +9,10 @@ import { OrderItem } from '../../entities/order-item.entity';
 import { Outbox } from '../../entities/outbox.entity';
 import { ORDER_EVENT_TYPE } from '../../events/order-event-type.constant';
 import { InventoryReservationService } from '../../saga/inventory-reservation.service';
-import { PAYMENT_PROVIDER, PaymentProvider } from '../../saga/payment-provider.interface';
+import {
+	PAYMENT_PROVIDER,
+	PaymentProvider,
+} from '../../saga/payment-provider.interface';
 
 @CommandHandler(CreateOrderCommand)
 export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
@@ -25,15 +28,23 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
 	async execute(command: CreateOrderCommand) {
 		const { dto } = command;
 
-		const subtotal = dto.items.reduce((sum, item) => sum + item.quantity * item.unitPrice, 0);
+		const subtotal = dto.items.reduce(
+			(sum, item) => sum + item.quantity * item.unitPrice,
+			0,
+		);
 		const taxRate = Number(this.configService.get('ORDER_TAX_RATE') ?? 0.1);
-		const shippingFee = Number(this.configService.get('ORDER_SHIPPING_FEE_FLAT') ?? 30000);
+		const shippingFee = Number(
+			this.configService.get('ORDER_SHIPPING_FEE_FLAT') ?? 30000,
+		);
 		const taxAmount = Math.round(subtotal * taxRate * 100) / 100;
 		const totalAmount = subtotal + taxAmount + shippingFee;
 
 		// Step 1: Reserve Inventory (Product service qua TCP). Fail ở đây -> chưa trừ được gì, không cần compensate.
 		await this.inventoryReservation.reserve(
-			dto.items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+			dto.items.map((item) => ({
+				productId: item.productId,
+				quantity: item.quantity,
+			})),
 		);
 
 		// Order được tạo PENDING trước khi capture payment để có orderId cho payment provider.
@@ -61,16 +72,30 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
 
 		// Step 2: Capture Payment qua apps/payment (Phase 2) — order.id dùng làm idempotency key vì
 		// đã unique và cố định cho suốt vòng đời order, an toàn để Payment service dedupe khi retry.
-		const captureResult = await this.paymentProvider.capture(order.id, totalAmount, order.id);
+		const captureResult = await this.paymentProvider.capture(
+			order.id,
+			totalAmount,
+			order.id,
+		);
 
 		if (!captureResult.success) {
 			// Compensation: release inventory đã reserve, Order chuyển CANCELLED.
 			await this.inventoryReservation.release(
-				dto.items.map((item) => ({ productId: item.productId, quantity: item.quantity })),
+				dto.items.map((item) => ({
+					productId: item.productId,
+					quantity: item.quantity,
+				})),
 			);
-			await this.dataSource.getRepository(Order).update(order.id, { status: OrderStatus.CANCELLED });
-			this.logger.warn(`Order ${order.id} cancelled: payment capture failed (${captureResult.failureReason})`);
-			throw new RpcException({ statusCode: 402, message: `Payment failed: ${captureResult.failureReason ?? 'unknown reason'}` });
+			await this.dataSource
+				.getRepository(Order)
+				.update(order.id, { status: OrderStatus.CANCELLED });
+			this.logger.warn(
+				`Order ${order.id} cancelled: payment capture failed (${captureResult.failureReason})`,
+			);
+			throw new RpcException({
+				statusCode: 402,
+				message: `Payment failed: ${captureResult.failureReason ?? 'unknown reason'}`,
+			});
 		}
 
 		// Step 3: Confirm — chuyển PROCESSING + ghi outbox event cùng transaction.

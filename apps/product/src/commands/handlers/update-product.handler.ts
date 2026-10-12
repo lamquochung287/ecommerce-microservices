@@ -10,9 +10,12 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(UpdateProductCommand)
 export class UpdateProductHandler implements ICommandHandler<UpdateProductCommand> {
 	constructor(
-		@InjectRepository(Product) private readonly productRepository: Repository<Product>,
-		@InjectRepository(Category) private readonly categoryRepository: Repository<Category>,
-		@InjectRepository(Brand) private readonly brandRepository: Repository<Brand>,
+		@InjectRepository(Product)
+		private readonly productRepository: Repository<Product>,
+		@InjectRepository(Category)
+		private readonly categoryRepository: Repository<Category>,
+		@InjectRepository(Brand)
+		private readonly brandRepository: Repository<Brand>,
 	) {}
 
 	async execute(command: UpdateProductCommand) {
@@ -26,11 +29,19 @@ export class UpdateProductHandler implements ICommandHandler<UpdateProductComman
 
 		if (categoryId !== undefined) {
 			if (categoryId === null) {
-				throw new RpcException({ statusCode: 400, message: 'categoryId không được để trống' });
+				throw new RpcException({
+					statusCode: 400,
+					message: 'categoryId không được để trống',
+				});
 			}
-			const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+			const category = await this.categoryRepository.findOne({
+				where: { id: categoryId },
+			});
 			if (!category) {
-				throw new RpcException({ statusCode: 404, message: 'Category not found' });
+				throw new RpcException({
+					statusCode: 404,
+					message: 'Category not found',
+				});
 			}
 			product.category = category;
 		}
@@ -39,9 +50,14 @@ export class UpdateProductHandler implements ICommandHandler<UpdateProductComman
 			if (brandId === null) {
 				product.brand = null as any;
 			} else {
-				const brand = await this.brandRepository.findOne({ where: { id: brandId } });
+				const brand = await this.brandRepository.findOne({
+					where: { id: brandId },
+				});
 				if (!brand) {
-					throw new RpcException({ statusCode: 404, message: 'Brand not found' });
+					throw new RpcException({
+						statusCode: 404,
+						message: 'Brand not found',
+					});
 				}
 				product.brand = brand;
 			}

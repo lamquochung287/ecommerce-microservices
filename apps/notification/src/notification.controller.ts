@@ -15,6 +15,9 @@ export class NotificationController {
 	@MessagePattern({ cmd: NOTIFICATION_MESSAGE_PATTERN.GET_SENT_NOTIFICATIONS })
 	async getSentNotifications(@Payload() data?: { recipient?: string }) {
 		const where = data?.recipient ? { recipient: data.recipient } : {};
-		return this.sentNotificationRepository.find({ where, order: { createdAt: 'DESC' } });
+		return this.sentNotificationRepository.find({
+			where,
+			order: { createdAt: 'DESC' },
+		});
 	}
 }

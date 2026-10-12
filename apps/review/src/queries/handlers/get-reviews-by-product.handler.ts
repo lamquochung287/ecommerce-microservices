@@ -7,7 +7,8 @@ import { Review } from '../../entities/review.entity';
 @QueryHandler(GetReviewsByProductQuery)
 export class GetReviewsByProductHandler implements IQueryHandler<GetReviewsByProductQuery> {
 	constructor(
-		@InjectRepository(Review) private readonly reviewRepository: Repository<Review>,
+		@InjectRepository(Review)
+		private readonly reviewRepository: Repository<Review>,
 	) {}
 
 	async execute(query: GetReviewsByProductQuery) {

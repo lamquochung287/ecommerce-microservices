@@ -8,7 +8,8 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(UpdateAttributeCommand)
 export class UpdateAttributeHandler implements ICommandHandler<UpdateAttributeCommand> {
 	constructor(
-		@InjectRepository(Attribute) private readonly attributeRepository: Repository<Attribute>,
+		@InjectRepository(Attribute)
+		private readonly attributeRepository: Repository<Attribute>,
 	) {}
 
 	async execute(command: UpdateAttributeCommand) {
@@ -16,7 +17,10 @@ export class UpdateAttributeHandler implements ICommandHandler<UpdateAttributeCo
 
 		const attribute = await this.attributeRepository.findOne({ where: { id } });
 		if (!attribute) {
-			throw new RpcException({ statusCode: 404, message: 'Attribute not found' });
+			throw new RpcException({
+				statusCode: 404,
+				message: 'Attribute not found',
+			});
 		}
 
 		Object.assign(attribute, dto);

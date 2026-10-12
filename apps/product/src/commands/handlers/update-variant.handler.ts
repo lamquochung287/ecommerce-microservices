@@ -9,14 +9,19 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(UpdateVariantCommand)
 export class UpdateVariantHandler implements ICommandHandler<UpdateVariantCommand> {
 	constructor(
-		@InjectRepository(ProductVariant) private readonly variantRepository: Repository<ProductVariant>,
-		@InjectRepository(AttributeValue) private readonly attributeValueRepository: Repository<AttributeValue>,
+		@InjectRepository(ProductVariant)
+		private readonly variantRepository: Repository<ProductVariant>,
+		@InjectRepository(AttributeValue)
+		private readonly attributeValueRepository: Repository<AttributeValue>,
 	) {}
 
 	async execute(command: UpdateVariantCommand) {
 		const { id, dto } = command;
 
-		const variant = await this.variantRepository.findOne({ where: { id }, relations: ['attributeValues'] });
+		const variant = await this.variantRepository.findOne({
+			where: { id },
+			relations: ['attributeValues'],
+		});
 		if (!variant) {
 			throw new RpcException({ statusCode: 404, message: 'Variant not found' });
 		}
@@ -26,7 +31,10 @@ export class UpdateVariantHandler implements ICommandHandler<UpdateVariantComman
 				where: { id: In(dto.attributeValueIds) },
 			});
 			if (attributeValues.length !== dto.attributeValueIds.length) {
-				throw new RpcException({ statusCode: 404, message: 'One or more attribute values not found' });
+				throw new RpcException({
+					statusCode: 404,
+					message: 'One or more attribute values not found',
+				});
 			}
 			variant.attributeValues = attributeValues;
 		}

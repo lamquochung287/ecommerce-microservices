@@ -1,4 +1,13 @@
-import { IsDateString, IsEnum, IsInt, IsNumber, IsPositive, IsString, IsNotEmpty, Min } from 'class-validator';
+import {
+	IsDateString,
+	IsEnum,
+	IsInt,
+	IsNumber,
+	IsPositive,
+	IsString,
+	IsNotEmpty,
+	Min,
+} from 'class-validator';
 import { DiscountType } from '../entities/voucher.entity';
 
 export class CreateVoucherDto {

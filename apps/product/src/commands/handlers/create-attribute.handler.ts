@@ -9,20 +9,28 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(CreateAttributeCommand)
 export class CreateAttributeHandler implements ICommandHandler<CreateAttributeCommand> {
 	constructor(
-		@InjectRepository(Attribute) private readonly attributeRepository: Repository<Attribute>,
+		@InjectRepository(Attribute)
+		private readonly attributeRepository: Repository<Attribute>,
 	) {}
 
 	async execute(command: CreateAttributeCommand) {
 		const { dto } = command;
 
-		const existing = await this.attributeRepository.findOne({ where: { name: dto.name } });
+		const existing = await this.attributeRepository.findOne({
+			where: { name: dto.name },
+		});
 		if (existing) {
-			throw new RpcException({ statusCode: 409, message: 'Attribute already exists' });
+			throw new RpcException({
+				statusCode: 409,
+				message: 'Attribute already exists',
+			});
 		}
 
 		const attribute = this.attributeRepository.create({
 			name: dto.name,
-			values: dto.values.map((value) => Object.assign(new AttributeValue(), { value })),
+			values: dto.values.map((value) =>
+				Object.assign(new AttributeValue(), { value }),
+			),
 		});
 
 		return this.attributeRepository.save(attribute);

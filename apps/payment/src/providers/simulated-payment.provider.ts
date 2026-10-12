@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { createHmac } from 'crypto';
 import { ConfigService } from '@nestjs/config';
-import { ChargeResult, PaymentProvider, WebhookVerifyResult } from './payment-provider.interface';
+import {
+	ChargeResult,
+	PaymentProvider,
+	WebhookVerifyResult,
+} from './payment-provider.interface';
 
 // Provider mặc định (PAYMENT_PROVIDER=simulate) — không gọi ra ngoài, luôn trả success.
 // Test compensation/failure path bằng cách inject 1 provider giả throw lỗi, không sửa provider này
@@ -19,9 +23,17 @@ export class SimulatedPaymentProvider implements PaymentProvider {
 
 	// Webhook giả lập vẫn ký HMAC thật (cùng cơ chế provider thật sẽ dùng), chỉ khác ở chỗ payload
 	// do chính hệ thống tự phát sinh thay vì nhận từ VNPay/MoMo.
-	verifyWebhook(payload: Record<string, unknown>, signature: string): WebhookVerifyResult {
-		const secret = this.configService.get<string>('PAYMENT_WEBHOOK_SECRET', 'simulated-webhook-secret');
-		const expectedSignature = createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex');
+	verifyWebhook(
+		payload: Record<string, unknown>,
+		signature: string,
+	): WebhookVerifyResult {
+		const secret = this.configService.get<string>(
+			'PAYMENT_WEBHOOK_SECRET',
+			'simulated-webhook-secret',
+		);
+		const expectedSignature = createHmac('sha256', secret)
+			.update(JSON.stringify(payload))
+			.digest('hex');
 
 		if (expectedSignature !== signature) {
 			return { valid: false };

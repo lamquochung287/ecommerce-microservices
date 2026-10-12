@@ -21,7 +21,8 @@ interface OrderSummary {
 @CommandHandler(CreateReviewCommand)
 export class CreateReviewHandler implements ICommandHandler<CreateReviewCommand> {
 	constructor(
-		@InjectRepository(Review) private readonly reviewRepository: Repository<Review>,
+		@InjectRepository(Review)
+		private readonly reviewRepository: Repository<Review>,
 		@Inject(ORDER_TCP_CLIENT) private readonly orderClient: ClientProxy,
 	) {}
 
@@ -30,7 +31,10 @@ export class CreateReviewHandler implements ICommandHandler<CreateReviewCommand>
 
 		const order = await firstValueFrom(
 			this.orderClient
-				.send<OrderSummary>({ cmd: ORDER_MESSAGE_PATTERN.GET_ORDER }, { id: orderId })
+				.send<OrderSummary>(
+					{ cmd: ORDER_MESSAGE_PATTERN.GET_ORDER },
+					{ id: orderId },
+				)
 				.pipe(timeout(TCP_TIMEOUT_MS)),
 		);
 
@@ -41,9 +45,12 @@ export class CreateReviewHandler implements ICommandHandler<CreateReviewCommand>
 		// Không tin tưởng userId/productId client tự khai — verify order thật sự thuộc user này,
 		// đã ở trạng thái đủ để coi là "đã mua" (không cho review khi còn PENDING/PROCESSING), và
 		// có chứa đúng sản phẩm muốn review.
-		const belongsToUser = (order as unknown as { userId: string }).userId === userId;
+		const belongsToUser =
+			(order as unknown as { userId: string }).userId === userId;
 		const isReviewable = REVIEWABLE_STATUSES.includes(order.status);
-		const containsProduct = order.items?.some((item) => item.productId === productId);
+		const containsProduct = order.items?.some(
+			(item) => item.productId === productId,
+		);
 
 		if (!belongsToUser || !isReviewable || !containsProduct) {
 			throw new RpcException({
@@ -52,7 +59,13 @@ export class CreateReviewHandler implements ICommandHandler<CreateReviewCommand>
 			});
 		}
 
-		const review = this.reviewRepository.create({ userId, productId, orderId, rating, comment: comment ?? null });
+		const review = this.reviewRepository.create({
+			userId,
+			productId,
+			orderId,
+			rating,
+			comment: comment ?? null,
+		});
 		return this.reviewRepository.save(review);
 	}
 }

@@ -36,8 +36,12 @@ export class OrdersController {
 	}
 
 	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.UPDATE_ORDER_STATUS })
-	async updateOrderStatus(@Payload() payload: { id: string; dto: UpdateOrderStatusDto }) {
-		return this.commandBus.execute(new UpdateOrderStatusCommand(payload.id, payload.dto));
+	async updateOrderStatus(
+		@Payload() payload: { id: string; dto: UpdateOrderStatusDto },
+	) {
+		return this.commandBus.execute(
+			new UpdateOrderStatusCommand(payload.id, payload.dto),
+		);
 	}
 
 	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.CREATE_REFUND })

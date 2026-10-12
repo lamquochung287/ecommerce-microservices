@@ -11,17 +11,17 @@ import { CreateReviewDto } from '../../../review/src/dto/review.dto';
 @Controller('reviews')
 @UseGuards(JwtAuthGuard, PermissionGuard)
 export class ReviewController {
-  constructor(private readonly reviewService: ReviewService) {}
+	constructor(private readonly reviewService: ReviewService) {}
 
-  @Post()
-  @RequirePermission(ModuleName.REVIEW, Action.CREATE)
-  createReview(@Body() dto: CreateReviewDto) {
-    return this.reviewService.createReview(dto);
-  }
+	@Post()
+	@RequirePermission(ModuleName.REVIEW, Action.CREATE)
+	createReview(@Body() dto: CreateReviewDto) {
+		return this.reviewService.createReview(dto);
+	}
 
-  @Get('product/:productId')
-  @RequirePermission(ModuleName.REVIEW, Action.READ)
-  getReviewsByProduct(@Param('productId') productId: string) {
-    return this.reviewService.getReviewsByProduct(productId);
-  }
+	@Get('product/:productId')
+	@RequirePermission(ModuleName.REVIEW, Action.READ)
+	getReviewsByProduct(@Param('productId') productId: string) {
+		return this.reviewService.getReviewsByProduct(productId);
+	}
 }

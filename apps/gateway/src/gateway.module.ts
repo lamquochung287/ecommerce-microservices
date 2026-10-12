@@ -73,13 +73,8 @@ import { ConfigService } from '@nestjs/config';
 	],
 	exports: [],
 })
-
 export class GatewayModule implements NestModule {
 	configure(consumer: MiddlewareConsumer) {
-		consumer
-			.apply(RequestTrackerMiddleware)
-			.exclude('health')
-			.forRoutes('*');
+		consumer.apply(RequestTrackerMiddleware).exclude('health').forRoutes('*');
 	}
 }
-

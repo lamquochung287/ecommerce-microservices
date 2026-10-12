@@ -7,7 +7,8 @@ import { ProductVariant } from '../../entities/product-variant.entity';
 @QueryHandler(GetVariantsQuery)
 export class GetVariantsHandler implements IQueryHandler<GetVariantsQuery> {
 	constructor(
-		@InjectRepository(ProductVariant) private readonly variantRepository: Repository<ProductVariant>,
+		@InjectRepository(ProductVariant)
+		private readonly variantRepository: Repository<ProductVariant>,
 	) {}
 
 	async execute(query: GetVariantsQuery) {

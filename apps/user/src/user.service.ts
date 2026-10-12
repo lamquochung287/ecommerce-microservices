@@ -25,12 +25,14 @@ export class UserService {
 		private readonly configService: ConfigService,
 		private readonly cachedService: CachedService,
 		private readonly roleService: RoleService,
-	) { }
+	) {}
 
 	// Permissions hiệu lực = OR bitmask tất cả role user đang có. Fallback về field User.permissions cũ
 	// nếu user chưa được gán role nào (giữ tương thích ngược, tránh user cũ mất quyền truy cập đột ngột).
 	private async resolvePermissions(user: User): Promise<number> {
-		const rolePermissions = await this.roleService.getEffectivePermissions(user.id);
+		const rolePermissions = await this.roleService.getEffectivePermissions(
+			user.id,
+		);
 		return rolePermissions ?? Number(user.permissions);
 	}
 
@@ -118,7 +120,7 @@ export class UserService {
 		return {
 			accessToken,
 			refreshToken,
-			sessionId
+			sessionId,
 		};
 	}
 
@@ -146,7 +148,7 @@ export class UserService {
 
 			// Get latest user info and permissions
 			const user = await this.userRepository.findOne({
-				where: { userId: payload.sub }
+				where: { userId: payload.sub },
 			});
 
 			if (!user || !user.isActive) {

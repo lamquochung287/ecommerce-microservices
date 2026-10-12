@@ -7,7 +7,8 @@ import { Refund } from '../../entities/refund.entity';
 @QueryHandler(GetRefundsQuery)
 export class GetRefundsHandler implements IQueryHandler<GetRefundsQuery> {
 	constructor(
-		@InjectRepository(Refund) private readonly refundRepository: Repository<Refund>,
+		@InjectRepository(Refund)
+		private readonly refundRepository: Repository<Refund>,
 	) {}
 
 	async execute(query: GetRefundsQuery) {

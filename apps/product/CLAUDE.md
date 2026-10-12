@@ -1,19 +1,26 @@
-# Hướng dẫn cho AI Agents - Product Module (AGENTS_GUIDE.md)
+# Hướng dẫn cho AI Agents - Product Module
 
 ## Vai trò
-Microservice quản lý nghiệp vụ liên quan đến Sản phẩm, Danh mục, và Kho hàng (Inventory).
+Microservice TCP :3003: Product, Category, Brand, Attribute/AttributeValue, Variant và **tồn kho**. **Bắt buộc CQRS** (`commands/`, `queries/`, `events/`, `handlers/`).
+Chi tiết: [docs/module-processing-flows.md §3](../../docs/module-processing-flows.md).
 
-## Chức năng chính
-- CRUD (Tạo, đọc, sửa, xoá) sản phẩm, danh mục, thương hiệu.
-- Quản lý số lượng tồn kho (đặt trước, trừ kho, hoàn kho).
-- Tìm kiếm, lọc sản phẩm (trong tương lai có thể mở rộng index bằng Elasticsearch).
+## Mô hình dữ liệu
+`Product{slug unique, price, stock, lowStockThreshold=10, @VersionColumn, isActive, images jsonb, category, brand?}` · `ProductVariant{sku unique, price? (null = dùng giá product), stock, @VersionColumn, M:N AttributeValue}` · `Attribute{name unique} 1:N AttributeValue`.
+**`Product.stock` và `Variant.stock` là hai kho độc lập** (không cộng dồn).
 
-## Kiến trúc CQRS
-Do nghiệp vụ sản phẩm rất phức tạp, module này **bắt buộc** áp dụng CQRS (Command Query Responsibility Segregation) pattern với `@nestjs/cqrs`.
-- **Commands**: Nằm trong thư mục `commands/`. Dùng cho các thao tác thay đổi dữ liệu (Tạo mới, Cập nhật, Xoá, Trừ tồn kho).
-- **Queries**: Nằm trong thư mục `queries/`. Dùng cho các thao tác đọc (Lấy chi tiết, Lấy danh sách, Phân trang, Search).
-- **Handlers**: Mỗi command/query phải có một Handler đi kèm xử lý logic nghiệp vụ và tương tác với DB. Nằm ở `handlers/`.
+## AdjustStock (`adjust-stock.handler.ts`) — điểm quan trọng nhất
+- Input `{productId | variantId, delta}`; thiếu cả hai → 400. Variant ưu tiên nếu có.
+- Transaction: `next = stock + delta`; `< 0` → 409 "Không đủ tồn kho"; save (optimistic lock qua `version`); lỗi version → retry **1 lần**, vẫn lỗi → 409.
+- Là **RPC duy nhất** cho trừ kho (delta âm, Orders gọi), hoàn kho (delta dương, compensation) và điều chỉnh tay. Không có "reserve" riêng → trừ là trừ thật.
+- Mỗi `save()` Product (kể cả đổi mô tả) cũng bump `version` → có thể làm một lần trừ kho đang chạy bị retry.
 
-## Quy tắc lập trình tại Product Service
-- Chấp nhận các lệnh qua TCP Pattern từ Gateway (để client lấy thông tin) hoặc các service khác (như Orders khi cần check/trừ tồn kho).
-- Đảm bảo tính nhất quán dữ liệu (ACID Transaction) khi xử lý các Command ảnh hưởng đến số lượng tồn kho.
+## Quy tắc
+- Create Product: category phải tồn tại (404), brand nếu có (404); publish `ProductCreatedEvent` (handler hiện chỉ `console.log`, stub cho search).
+- Update: `categoryId` null → 400; `brandId: null` gỡ brand.
+- Variant: `sku` unique (409), mọi `attributeValueIds` phải tồn tại (404). Xoá Variant = `softRemove`; xoá Product/Brand/Attribute = hard `remove` (không chặn khi đã có order tham chiếu — tham chiếu mềm bằng UUID).
+- `getProducts`: filter category/brand/giá/isActive/search (`ILIKE %q%`, chưa có index), sort chỉ whitelist `name|price|stock|createdAt`, trả `{data, meta}` (`buildPaginationMeta`). `getProduct` chỉ kèm `category`.
+- Mọi Command đổi tồn kho phải ACID (transaction).
+
+## Gotchas
+- `lowStockThreshold` có cột nhưng chưa có logic cảnh báo; chưa có lịch sử điều chỉnh kho.
+- Chưa cache catalog. Khi tải cao cân nhắc `UPDATE … SET stock = stock - :q WHERE stock >= :q` thay optimistic lock.

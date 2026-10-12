@@ -13,7 +13,9 @@ export class CartService {
 		private readonly cachedService: CachedService,
 		private readonly configService: ConfigService,
 	) {
-		this.ttlSeconds = Number(this.configService.get('CART_TTL_SECONDS') ?? DEFAULT_CART_TTL_SECONDS);
+		this.ttlSeconds = Number(
+			this.configService.get('CART_TTL_SECONDS') ?? DEFAULT_CART_TTL_SECONDS,
+		);
 	}
 
 	private key(userId: string): string {
@@ -62,7 +64,11 @@ export class CartService {
 
 	private async save(userId: string, cart: Cart): Promise<Cart> {
 		cart.updatedAt = new Date().toISOString();
-		await this.cachedService.set(this.key(userId), JSON.stringify(cart), this.ttlSeconds);
+		await this.cachedService.set(
+			this.key(userId),
+			JSON.stringify(cart),
+			this.ttlSeconds,
+		);
 		return cart;
 	}
 }

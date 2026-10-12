@@ -17,7 +17,14 @@ const dataSource = new DataSource({
 	username: process.env.DB_USER || 'root',
 	password: process.env.DB_PASSWORD || 'password',
 	database: process.env.DB_NAME || 'ecommerce',
-	entities: [Product, Category, Brand, ProductVariant, AttributeValue, Attribute],
+	entities: [
+		Product,
+		Category,
+		Brand,
+		ProductVariant,
+		AttributeValue,
+		Attribute,
+	],
 	synchronize: false,
 });
 
@@ -61,9 +68,11 @@ describe('AdjustStockHandler (concurrency)', () => {
 
 		expect(fulfilled.length).toBe(1);
 		expect(rejected.length).toBe(1);
-		expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(RpcException);
+		expect(rejected[0].reason).toBeInstanceOf(RpcException);
 
-		const finalProduct = await dataSource.getRepository(Product).findOne({ where: { id: productId } });
+		const finalProduct = await dataSource
+			.getRepository(Product)
+			.findOne({ where: { id: productId } });
 		expect(finalProduct?.stock).toBe(2); // 10 - 8 = 2, không thể xuống âm
 	});
 });

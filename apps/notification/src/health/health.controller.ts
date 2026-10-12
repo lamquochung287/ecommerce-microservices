@@ -1,6 +1,10 @@
 import { Controller } from '@nestjs/common';
 import { MessagePattern } from '@nestjs/microservices';
-import { HealthCheckService, TypeOrmHealthIndicator, HealthCheck } from '@nestjs/terminus';
+import {
+	HealthCheckService,
+	TypeOrmHealthIndicator,
+	HealthCheck,
+} from '@nestjs/terminus';
 import { HEALTH_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
 
 @Controller()

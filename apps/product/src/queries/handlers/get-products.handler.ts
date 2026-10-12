@@ -10,11 +10,23 @@ const SORTABLE_FIELDS = new Set(['name', 'price', 'stock', 'createdAt']);
 @QueryHandler(GetProductsQuery)
 export class GetProductsHandler implements IQueryHandler<GetProductsQuery> {
 	constructor(
-		@InjectRepository(Product) private readonly productRepository: Repository<Product>,
+		@InjectRepository(Product)
+		private readonly productRepository: Repository<Product>,
 	) {}
 
 	async execute(query: GetProductsQuery) {
-		const { page, limit, sortBy, sortOrder, categoryId, brandId, minPrice, maxPrice, isActive, search } = query;
+		const {
+			page,
+			limit,
+			sortBy,
+			sortOrder,
+			categoryId,
+			brandId,
+			minPrice,
+			maxPrice,
+			isActive,
+			search,
+		} = query;
 		const skip = (page - 1) * limit;
 
 		const qb = this.productRepository
@@ -24,10 +36,14 @@ export class GetProductsHandler implements IQueryHandler<GetProductsQuery> {
 
 		if (categoryId) qb.andWhere('category.id = :categoryId', { categoryId });
 		if (brandId) qb.andWhere('brand.id = :brandId', { brandId });
-		if (minPrice !== undefined) qb.andWhere('product.price >= :minPrice', { minPrice });
-		if (maxPrice !== undefined) qb.andWhere('product.price <= :maxPrice', { maxPrice });
-		if (isActive !== undefined) qb.andWhere('product.isActive = :isActive', { isActive });
-		if (search) qb.andWhere('product.name ILIKE :search', { search: `%${search}%` });
+		if (minPrice !== undefined)
+			qb.andWhere('product.price >= :minPrice', { minPrice });
+		if (maxPrice !== undefined)
+			qb.andWhere('product.price <= :maxPrice', { maxPrice });
+		if (isActive !== undefined)
+			qb.andWhere('product.isActive = :isActive', { isActive });
+		if (search)
+			qb.andWhere('product.name ILIKE :search', { search: `%${search}%` });
 
 		const sortField = SORTABLE_FIELDS.has(sortBy) ? sortBy : 'createdAt';
 		qb.orderBy(`product.${sortField}`, sortOrder).skip(skip).take(limit);

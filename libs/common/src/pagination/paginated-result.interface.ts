@@ -10,7 +10,11 @@ export interface PaginatedResult<T> {
 	meta: PaginationMeta;
 }
 
-export function buildPaginationMeta(total: number, page: number, limit: number): PaginationMeta {
+export function buildPaginationMeta(
+	total: number,
+	page: number,
+	limit: number,
+): PaginationMeta {
 	return {
 		total,
 		page,

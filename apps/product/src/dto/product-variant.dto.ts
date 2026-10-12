@@ -1,4 +1,12 @@
-import { IsString, IsNumber, IsOptional, IsUUID, Min, IsArray, ArrayMinSize } from 'class-validator';
+import {
+	IsString,
+	IsNumber,
+	IsOptional,
+	IsUUID,
+	Min,
+	IsArray,
+	ArrayMinSize,
+} from 'class-validator';
 
 export class CreateVariantDto {
 	@IsUUID()

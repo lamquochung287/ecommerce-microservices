@@ -8,7 +8,8 @@ import { RpcException } from '@nestjs/microservices';
 @CommandHandler(RejectRefundCommand)
 export class RejectRefundHandler implements ICommandHandler<RejectRefundCommand> {
 	constructor(
-		@InjectRepository(Refund) private readonly refundRepository: Repository<Refund>,
+		@InjectRepository(Refund)
+		private readonly refundRepository: Repository<Refund>,
 	) {}
 
 	async execute(command: RejectRefundCommand) {
@@ -19,7 +20,10 @@ export class RejectRefundHandler implements ICommandHandler<RejectRefundCommand>
 			throw new RpcException({ statusCode: 404, message: 'Refund not found' });
 		}
 		if (refund.status !== RefundStatus.PENDING) {
-			throw new RpcException({ statusCode: 400, message: `Refund đang ở trạng thái ${refund.status}, không thể reject` });
+			throw new RpcException({
+				statusCode: 400,
+				message: `Refund đang ở trạng thái ${refund.status}, không thể reject`,
+			});
 		}
 
 		refund.status = RefundStatus.REJECTED;

@@ -25,13 +25,31 @@ export class TcpResilienceService {
 			return existing;
 		}
 
-		const call = (client: ClientProxy, pattern: Record<string, unknown>, data: unknown) =>
-			firstValueFrom(client.send(pattern, data).pipe(timeout(TIMEOUT_MS)));
-		const breaker: CircuitBreaker<any, unknown> = new CircuitBreaker(call, BREAKER_OPTIONS);
+		const call = (
+			client: ClientProxy,
+			pattern: Record<string, unknown>,
+			data: unknown,
+		) => firstValueFrom(client.send(pattern, data).pipe(timeout(TIMEOUT_MS)));
+		const breaker: CircuitBreaker<any, unknown> = new CircuitBreaker(
+			call,
+			BREAKER_OPTIONS,
+		);
 
-		breaker.on('open', () => this.logger.warn(`Circuit breaker OPEN for ${serviceKey} — service tạm bị coi là unhealthy, request sẽ fail-fast`));
-		breaker.on('halfOpen', () => this.logger.log(`Circuit breaker HALF-OPEN for ${serviceKey} — thử lại request kế tiếp`));
-		breaker.on('close', () => this.logger.log(`Circuit breaker CLOSED for ${serviceKey} — service đã healthy trở lại`));
+		breaker.on('open', () =>
+			this.logger.warn(
+				`Circuit breaker OPEN for ${serviceKey} — service tạm bị coi là unhealthy, request sẽ fail-fast`,
+			),
+		);
+		breaker.on('halfOpen', () =>
+			this.logger.log(
+				`Circuit breaker HALF-OPEN for ${serviceKey} — thử lại request kế tiếp`,
+			),
+		);
+		breaker.on('close', () =>
+			this.logger.log(
+				`Circuit breaker CLOSED for ${serviceKey} — service đã healthy trở lại`,
+			),
+		);
 
 		this.breakers.set(serviceKey, breaker);
 		return breaker;
@@ -41,7 +59,12 @@ export class TcpResilienceService {
 	 * Gọi TCP microservice qua circuit breaker dùng chung theo serviceKey.
 	 * Ném lỗi gốc (timeout/RpcException/breaker-open) để caller tự xử lý qua MicroserviceErrorHandler.
 	 */
-	async send<T>(serviceKey: string, client: ClientProxy, pattern: Record<string, unknown>, data: unknown): Promise<T> {
+	async send<T>(
+		serviceKey: string,
+		client: ClientProxy,
+		pattern: Record<string, unknown>,
+		data: unknown,
+	): Promise<T> {
 		const breaker = this.getBreaker(serviceKey);
 		return breaker.fire(client, pattern, data) as Promise<T>;
 	}

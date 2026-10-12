@@ -8,10 +8,10 @@ import { PaymentWebhookDto } from '../../../payment/src/dto/charge-payment.dto';
 @ApiTags('Payment Webhooks')
 @Controller('webhooks/payments')
 export class PaymentWebhookController {
-  constructor(private readonly paymentService: PaymentService) {}
+	constructor(private readonly paymentService: PaymentService) {}
 
-  @Post()
-  handleWebhook(@Body() dto: PaymentWebhookDto) {
-    return this.paymentService.handleWebhook(dto);
-  }
+	@Post()
+	handleWebhook(@Body() dto: PaymentWebhookDto) {
+		return this.paymentService.handleWebhook(dto);
+	}
 }

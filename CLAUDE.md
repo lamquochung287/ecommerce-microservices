@@ -18,26 +18,46 @@ Dự án tuân theo chuẩn NestJS Monorepo, chia làm `apps` (các ứng dụng
 
 *Ghi chú: Xem chi tiết hướng dẫn lập trình cho từng module tại file `CLAUDE.md` bên trong thư mục của module tương ứng.*
 
-- **`apps/gateway`**: Nhận các request HTTP từ bên ngoài. Xem chi tiết tại [apps/gateway/CLAUDE.md](./apps/gateway/CLAUDE.md).
-- **`apps/user`**: Microservice phụ trách User và Authentication. Xem chi tiết tại [apps/user/CLAUDE.md](./apps/user/CLAUDE.md).
-- **`apps/product`**: Microservice quản lý dữ liệu Sản phẩm. Xem chi tiết tại [apps/product/CLAUDE.md](./apps/product/CLAUDE.md).
-- **`apps/orders`**: Microservice quản lý dữ liệu Đơn hàng. Xem chi tiết tại [apps/orders/CLAUDE.md](./apps/orders/CLAUDE.md).
+- **`apps/gateway`** (HTTP :3000): entry duy nhất, auth/phân quyền/idempotency/throttle, routing TCP. [apps/gateway/CLAUDE.md](./apps/gateway/CLAUDE.md).
+- **`apps/user`** (TCP :3001): User, JWT, Role (RBAC bitmask), Address. [apps/user/CLAUDE.md](./apps/user/CLAUDE.md).
+- **`apps/orders`** (TCP :3002): Cart (Redis), Order, Refund, Checkout Saga, Outbox. [apps/orders/CLAUDE.md](./apps/orders/CLAUDE.md).
+- **`apps/product`** (TCP :3003): Product/Category/Brand/Attribute/Variant + tồn kho. [apps/product/CLAUDE.md](./apps/product/CLAUDE.md).
+- **`apps/payment`** (TCP :3004): charge idempotent, webhook HMAC. [apps/payment/CLAUDE.md](./apps/payment/CLAUDE.md).
+- **`apps/notification`** (TCP :3005): email theo event Orders. [apps/notification/CLAUDE.md](./apps/notification/CLAUDE.md).
+- **`apps/review`** (TCP :3006): review có verify đã mua. [apps/review/CLAUDE.md](./apps/review/CLAUDE.md).
+- **`apps/promotion`** (TCP :3007): voucher. [apps/promotion/CLAUDE.md](./apps/promotion/CLAUDE.md).
 
 ### Libs (Shared Libraries)
 
 - **`libs/common`**: Chứa các filter cơ sở (như `AbstractRpcExceptionFilter`), module dùng chung.
 - **`libs/database`**: Cấu hình TypeORM kết nối với cơ sở dữ liệu PostgreSQL. Các entities được import tự động nếu dùng `autoLoadEntities: true` hoặc thông qua `forFeature`.
 - **`libs/cached`**: Chứa cấu hình và module kết nối Redis (sử dụng `ioredis`). Dùng cho caching và các tác vụ yêu cầu tốc độ cao (ví dụ: quản lý token).
-- **`libs/constant`**: Quản lý tập trung các biến hằng số toàn cục (ví dụ: `PORT_TCP` định nghĩa cổng TCP cho từng microservice).
+- **`libs/constant`**: `PORT_TCP`, `NAME_SERVICE_TCP`, `*_MESSAGE_PATTERN` (mọi pattern TCP), `Action`/`ModuleName` (bitmask phân quyền).
+- **`libs/media`**: `MediaService` (MinIO): upload, presigned URL.
+- Alias import: `@lib/common`, `@lib/database`, `@lib/cached`, `libs/constant/...`.
+
+## 2.1. Kiến thức hệ thống cần nắm (đã xác minh với code)
+
+Người mới đọc [docs/onboarding-guide.md](./docs/onboarding-guide.md) trước (lộ trình đọc theo mục tiêu). Tài liệu đầy đủ trong `docs/`: [business-flows.md](./docs/business-flows.md) (luồng + rule), [module-processing-flows.md](./docs/module-processing-flows.md) (xử lý chi tiết từng module), [design-trade-offs.md](./docs/design-trade-offs.md) (trade-off + rủi ro), [system-architecture.md](./docs/system-architecture.md).
+
+- **Một DB PostgreSQL chung + một bộ migration** (`libs/database/src/migrations`, mỗi service `migrationsRun:true`, `synchronize:false`). Đổi schema = viết migration (`npm run migration:generate`). Không FK chéo service, tham chiếu bằng UUID.
+- **Gọi service**: `{cmd: <pattern>}` qua TCP, host hiện hardcode `localhost`. Gateway→service đi qua `TcpResilienceService` (circuit breaker + timeout 10s); service→service chỉ có `timeout()`.
+- **Event giữa service** = Outbox (Orders) + `ClientProxy.emit` tới từng subscriber; **at-most-once**, không dùng `EventBus` của CQRS cho liên-service.
+- **Checkout** (`POST /cart/checkout`): Gateway snapshot giá từ Product → Orders Saga: trừ kho (`ADJUST_STOCK`) → Order PENDING → Payment charge (idempotencyKey=orderId) → PROCESSING + Outbox; payment fail/timeout → hoàn kho + CANCELLED (402). `PROCESSING→PAID` hiện chỉ bằng PATCH thủ công.
+- **Auth**: access 15m + refresh 7d; session = Redis `refresh_token:{userId}:{sessionId}`; Gateway `VERIFY_TOKEN` mỗi request, permissions = OR bitmask role (tính lại mỗi request). Không có endpoint refresh.
+- **Gateway** bắt buộc header `x-api-key` cho mọi route (trừ `/health`); `x-idempotency-key` tuỳ chọn cho method ghi.
+- **Env**: `validateEnv` bắt buộc `DB_*`, `REDIS_*`, `JWT_*`, `API_KEY`. Tuỳ chọn: `ORDER_TAX_RATE`, `ORDER_SHIPPING_FEE_FLAT`, `CART_TTL_SECONDS`, `PAYMENT_WEBHOOK_SECRET`, `CORS_ORIGINS`, `THROTTLE_LIMIT_DEFAULT`, `DB_POOL_MAX/MIN`.
+- **Chạy**: `npm run docker:up` (postgres, redis, jaeger, prometheus, grafana, minio) → `npm run start:all`; `npm run seed` (dữ liệu lớn, mật khẩu `Password123`).
+- **Rủi ro đã biết, không lặp lại khi viết code mới**: tin `unitPrice/userId` từ client ở `POST /orders`; thiếu kiểm tra chủ sở hữu (orders, refunds, addresses); voucher chưa nối checkout; logout không auth. Danh sách đầy đủ: [design-trade-offs.md §5](./docs/design-trade-offs.md).
 
 ## 3. Công nghệ Dữ liệu (Tech Stack)
 
 - **Core**: NestJS v11, TypeScript.
-- **Database**: PostgreSQL (quản lý qua Docker Compose).
+- **Database**: PostgreSQL 15 (Docker Compose). Ngoài ra Redis (cache/session/cart/rate-limit/idempotency), MinIO (media), Jaeger + Prometheus + Grafana (observability).
 - **ORM**: TypeORM.
 - **Caching & In-memory Store**: Redis.
 - **Authentication**: JWT (Access Token, Refresh Token), bcrypt (hashing).
-- **Design Pattern**: CQRS (Command Query Responsibility Segregation) sử dụng `@nestjs/cqrs` cho các services phức tạp.
+- **Design Pattern**: CQRS (`@nestjs/cqrs`) cho product, orders, payment, review, promotion (user & notification không dùng); Saga, Transactional Outbox, optimistic/pessimistic locking, circuit breaker (opossum).
 
 ## 4. Quy tắc Lập trình (Coding Standards & Rules)
 
@@ -78,4 +98,4 @@ Khi viết code hoặc chỉnh sửa dự án, AI Agents **bắt buộc** phải
 
 ---
 
-_Ghi chú: Cập nhật file này nếu có thêm libs, apps mới. Các quy tắc chi tiết của từng app nên được viết trong `CLAUDE.md` của app đó._
+_Ghi chú: Cập nhật file này nếu có thêm libs, apps mới, hoặc khi hành vi nghiệp vụ trong §2.1 thay đổi (và cập nhật `docs/` tương ứng). Các quy tắc chi tiết của từng app nên được viết trong `CLAUDE.md` của app đó._
