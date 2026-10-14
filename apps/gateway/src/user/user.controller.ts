@@ -11,7 +11,6 @@ import {
 	UploadedFile,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserService } from './user.service';
 import { LoginUserDto, RegisterUserDto } from './dto/user.dto';
@@ -29,13 +28,11 @@ export class UserController {
 
 	@Post('register')
 	@HttpCode(HttpStatus.CREATED)
-	@Throttle({ default: { limit: 5, ttl: 60000 } })
 	register(@Body() dto: RegisterUserDto) {
 		return this.userService.register(dto);
 	}
 
 	@Post('login')
-	@Throttle({ default: { limit: 5, ttl: 60000 } })
 	login(@Body() dto: LoginUserDto) {
 		return this.userService.login(dto);
 	}

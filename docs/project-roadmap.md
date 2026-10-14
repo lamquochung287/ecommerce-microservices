@@ -188,7 +188,7 @@ Chi tiết bằng chứng/đề xuất: [design-trade-offs.md §5](./design-trad
 | Tin `unitPrice` + `userId` từ client ở `POST /orders` | Customer đặt đơn giá tuỳ ý / mạo danh user | CAO | Chỉ `/cart/checkout` lấy giá server-side (R1) |
 | Thiếu kiểm tra chủ sở hữu (orders, refunds, addresses) | Đọc/sửa dữ liệu của user khác; `GET /orders` không `userId` trả mọi đơn | CAO | Mới có phân quyền theo module/action (R2, R3) |
 | Saga không có state bền | Kho bị trừ khi crash giữa các bước; payment charge xong nhưng timeout → huỷ đơn | CAO | Cần job reconcile đơn `PENDING` + đối soát payment |
-| Orders không nghe `payment_succeeded/failed` | `PROCESSING→PAID` chỉ bằng PATCH thủ công | TRUNG BÌNH | Bắt buộc nối khi dùng provider async/webhook thật |
+| Webhook thanh toán chưa cập nhật Order | Orders đã nghe `payment_succeeded` từ charge đồng bộ, nhưng webhook của provider async (VNPay/MoMo) chưa nối tới Order | TRUNG BÌNH | Nối webhook → cập nhật Order khi dùng provider thật |
 | Outbox at-most-once | Event có thể mất khi consumer down; phát trùng khi nhiều instance | TRUNG BÌNH | Không ack, không `SKIP LOCKED`, Notification không khử trùng |
 | Cancel/Refund không có side-effect | Không hoàn kho/tiền; refund không tự `REFUNDED` khi order PAID/SHIPPED | TRUNG BÌNH | Chỉ cập nhật sổ sách (R5, R6) |
 | Voucher chưa nối checkout | Trừ lượt ngay khi apply, không hoàn; không giới hạn theo user | TRUNG BÌNH | R7 |

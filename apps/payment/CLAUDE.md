@@ -8,7 +8,7 @@ Chi tiết: [docs/business-flows.md §2.7](../../docs/business-flows.md), [docs/
 `charge_payment` · `handle_payment_webhook` · `get_transaction` (giao dịch mới nhất theo `orderId`, `null` nếu chưa có).
 
 ## Luồng
-- **Charge**: tìm `PaymentTransaction` theo `idempotencyKey` (unique) → có thì trả lại kết quả cũ → `provider.charge` → lưu `SUCCEEDED|FAILED` → `emit payment_succeeded|payment_failed` tới Orders (hiện **không có consumer**) → trả `{success, transactionId, failureReason?}`.
+- **Charge**: tìm `PaymentTransaction` theo `idempotencyKey` (unique) → có thì trả lại kết quả cũ → `provider.charge` → lưu `SUCCEEDED|FAILED` → `emit payment_succeeded|payment_failed` tới Orders (consumer: `PaymentEventsController` ở Orders) → trả `{success, transactionId, failureReason?}`.
 - **Webhook**: `provider.verifyWebhook` (HMAC-SHA256 trên `JSON.stringify(payload)` với `PAYMENT_WEBHOOK_SECRET`) → sai = 400 → `eventId` đã có trong `payment_webhook_logs` (unique) → `{alreadyProcessed:true}`; mới → ghi log. Webhook **chưa** cập nhật Order/Transaction.
 
 ## Quy tắc

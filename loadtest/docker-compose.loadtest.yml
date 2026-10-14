@@ -1,0 +1,99 @@
+# Dùng kèm file gốc:
+#   docker compose -f docker-compose.yml -f loadtest/docker-compose.loadtest.yml up -d --build
+# Giới hạn tài nguyên mô phỏng VPS 2 vCPU / 4 GB: apps 0.8 CPU + 2.5 GB, postgres 1.0 CPU + 1 GB,
+# redis 0.2 CPU + 0.5 GB (tổng 2 CPU / 4 GB). Observability (prometheus, grafana, jaeger) không tính vào quota.
+# Đổi con số bằng biến môi trường LT_* để thử cấu hình khác.
+services:
+  postgres:
+    cpus: ${LT_PG_CPUS:-1.0}
+    mem_limit: ${LT_PG_MEM:-1g}
+
+  redis:
+    cpus: ${LT_REDIS_CPUS:-0.2}
+    mem_limit: ${LT_REDIS_MEM:-512m}
+
+  # Bộ migration của dự án chỉ là các bản vá tăng dần (không có CREATE TABLE cho users/orders/products),
+  # nên không dựng được DB trống. Với load test: tạo bảng từ entity (schema:sync) rồi đánh dấu mọi
+  # migration cũ là đã chạy (--fake), migration mới hơn baseline chạy thật (xem loadtest/migrate.js). Bundle webpack cũng không chứa thư mục migrations nên app không tự migrate.
+  migrate:
+    build:
+      context: .
+      dockerfile: loadtest/Dockerfile.apps
+      target: compile
+    depends_on:
+      - postgres
+    restart: on-failure
+    command: node loadtest/migrate.js
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: root
+      DB_PASSWORD: password
+      DB_NAME: ecommerce
+
+  apps:
+    build:
+      context: .
+      dockerfile: loadtest/Dockerfile.apps
+    depends_on:
+      redis:
+        condition: service_started
+      migrate:
+        condition: service_completed_successfully
+    cpus: ${LT_APPS_CPUS:-0.8}
+    mem_limit: ${LT_APPS_MEM:-2560m}
+    ports:
+      - '3000:3000' # gateway
+      - '9464-9471:9464-9471' # metrics từng service cho prometheus
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: root
+      DB_PASSWORD: password
+      DB_NAME: ecommerce
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      JWT_ACCESS_SECRET: loadtest-access-secret
+      JWT_ACCESS_EXPIRATION: 15m
+      JWT_REFRESH_SECRET: loadtest-refresh-secret
+      JWT_REFRESH_EXPIRATION: 7d
+      API_KEY: ${LT_API_KEY:-loadtest-api-key}
+      # Các service gọi nhau qua 'localhost' (hardcode); trong container nó phân giải ra ::1 trước nên TCP bị từ chối.
+      NODE_OPTIONS: --dns-result-order=ipv4first
+      # Mặc định 50/service × 8 service vượt xa max_connections=100 của Postgres.
+      DB_POOL_MAX: ${LT_DB_POOL_MAX:-10}
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      # k6 chạy từ 1 IP nên phải nới throttle, nếu không sẽ đo ra 429 thay vì năng lực server.
+      THROTTLE_LIMIT_DEFAULT: 100000000
+      THROTTLE_LOGIN_LIMIT: 100000000
+
+  # Cho phép k6 đẩy metric vào Prometheus (xem trên Grafana).
+  prometheus:
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-remote-write-receiver
+
+  # k6 chạy trong cùng network compose, không cần cài trên máy. Chỉ chạy khi gọi `run k6` (profile k6).
+  # Cấu hình qua env: PROFILE, TARGET_VUS, RAMP, HOLD (xem loadtest/k6/load-test.js).
+  k6:
+    image: grafana/k6:latest
+    profiles: ['k6']
+    depends_on:
+      - apps
+      - prometheus
+    working_dir: /work
+    volumes:
+      - ./loadtest/k6:/work/loadtest/k6:ro
+      - ./scripts/seeded-users.csv:/work/scripts/seeded-users.csv:ro
+    environment:
+      BASE_URL: http://apps:3000
+      API_KEY: ${LT_API_KEY:-loadtest-api-key}
+      PROFILE: ${PROFILE:-mixed}
+      TARGET_VUS: ${TARGET_VUS:-500}
+      RAMP: ${RAMP:-5m}
+      HOLD: ${HOLD:-5m}
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: avg,p(95),p(99),max
+    command: run -o experimental-prometheus-rw loadtest/k6/load-test.js

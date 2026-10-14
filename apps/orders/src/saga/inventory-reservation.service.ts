@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { ClientProxy } from '@nestjs/microservices';
+import { ClientProxy, RpcException } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import { PRODUCT_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
 import { PRODUCT_TCP_CLIENT } from './product-client.constant';
@@ -49,14 +49,27 @@ export class InventoryReservationService {
 		}
 	}
 
-	private adjustStock(productId: string, delta: number) {
-		return firstValueFrom(
-			this.productClient
-				.send(
-					{ cmd: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK },
-					{ productId, delta },
-				)
-				.pipe(timeout(TCP_TIMEOUT_MS)),
-		);
+	private async adjustStock(productId: string, delta: number) {
+		try {
+			return await firstValueFrom(
+				this.productClient
+					.send(
+						{ cmd: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK },
+						{ productId, delta },
+					)
+					.pipe(timeout(TCP_TIMEOUT_MS)),
+			);
+		} catch (error) {
+			// Lỗi nghiệp vụ từ Product (vd 409 hết hàng, 404 không tìm thấy) về tới đây dưới dạng object thường
+			// {statusCode, message}. Phải bọc lại thành RpcException, nếu không filter mặc định của Nest đổi nó
+			// thành "Internal server error" và Gateway trả 502 thay vì mã lỗi gốc. Timeout/lỗi khác giữ nguyên.
+			if (typeof error?.statusCode === 'number') {
+				throw new RpcException({
+					statusCode: error.statusCode,
+					message: error.message,
+				});
+			}
+			throw error;
+		}
 	}
 }

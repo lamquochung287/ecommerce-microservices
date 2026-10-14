@@ -20,6 +20,11 @@ import { TcpResilienceModule } from './common/tcp-resilience.module';
 import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { ThrottlerStorageRedisService } from '@nest-lab/throttler-storage-redis';
 import { ConfigService } from '@nestjs/config';
+import type { ExecutionContext } from '@nestjs/common';
+
+const AUTH_ROUTES = ['/user/login', '/user/register'];
+const isAuthRoute = (context: ExecutionContext) =>
+	AUTH_ROUTES.includes(context.switchToHttp().getRequest().path);
 
 @Module({
 	imports: [
@@ -38,12 +43,21 @@ import { ConfigService } from '@nestjs/config';
 		ThrottlerModule.forRootAsync({
 			inject: [ConfigService],
 			useFactory: (configService: ConfigService) => ({
-				// Default: 100 request/phút cho mỗi IP trên toàn bộ route. Route nhạy cảm (login) override
-				// chặt hơn qua @Throttle ở controller — xem apps/gateway/src/user/user.controller.ts.
+				// default: 100 request/phút cho mỗi IP trên mọi route, trừ route auth.
+				// auth: chặt hơn cho login/register (mặc định 5/phút/IP, chỉnh bằng THROTTLE_LOGIN_LIMIT
+				// khi load test từ một IP).
 				throttlers: [
 					{
+						name: 'default',
 						ttl: 60000,
 						limit: configService.get<number>('THROTTLE_LIMIT_DEFAULT', 100),
+						skipIf: isAuthRoute,
+					},
+					{
+						name: 'auth',
+						ttl: 60000,
+						limit: configService.get<number>('THROTTLE_LOGIN_LIMIT', 5),
+						skipIf: (context) => !isAuthRoute(context),
 					},
 				],
 				storage: new ThrottlerStorageRedisService({

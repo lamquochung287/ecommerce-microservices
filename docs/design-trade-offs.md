@@ -71,8 +71,8 @@ Xem luồng: [business-flows.md](./business-flows.md), [module-processing-flows.
   - Consumer (Notification) **không idempotent theo event id** (payload cũng không có eventId) → trùng ⇒ email trùng.
 - **Hướng sửa**: thêm `eventId` vào payload + khử trùng ở consumer; ack thực (request-response `send`) hoặc broker; `FOR UPDATE SKIP LOCKED`; bỏ subscriber thừa.
 
-### 2.5 Orders không phản ứng với `payment_succeeded/failed`
-Payment emit sự kiện cho Orders nhưng Orders không có `@EventPattern` → `PROCESSING→PAID` chỉ xảy ra khi admin PATCH. Thực tế luồng hiện là **đồng bộ** (capture trong checkout), nên event là dư; nhưng khi chuyển sang provider thật dùng webhook bất đồng bộ (VNPay/MoMo) thì **bắt buộc** nối webhook → cập nhật Order, nếu không đơn sẽ kẹt `PROCESSING`.
+### 2.5 Orders phản ứng với `payment_succeeded/failed`
+Orders nhận `payment_succeeded` (`PaymentEventsController`) và tự chuyển `PROCESSING→PAID`; `payment_failed` chỉ log vì Saga đã hoàn kho + `CANCELLED` đồng bộ. Event là at-most-once và có thể tới khi đơn còn `PENDING` (Payment emit trước khi trả kết quả cho Saga), nên handler chờ thử lại ~3s rồi bỏ cuộc (đơn ở `PROCESSING`, admin PATCH thủ công). Còn thiếu: webhook của provider async (VNPay/MoMo) chưa cập nhật Order; đơn `CANCELLED` mà đã thu tiền chỉ được log cảnh báo, chưa tự hoàn tiền.
 
 ### 2.6 Cart ở Redis, chỉ lưu `productId + quantity`
 - **Được**: nhanh, TTL tự dọn, giá luôn lấy mới lúc checkout (không bị giá cũ).

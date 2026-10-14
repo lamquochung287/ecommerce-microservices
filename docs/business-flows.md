@@ -151,7 +151,7 @@ PENDING ──▶ PROCESSING ──▶ PAID ──▶ SHIPPED ──▶ DELIVERE
 
 - Chuyển trạng thái thủ công: `PATCH /orders/:id/status` (`ORDER|UPDATE`). Chuyển sai luồng → 400 `Không thể chuyển trạng thái từ X sang Y`.
 - Mỗi lần chuyển: trong **cùng 1 transaction** lưu Order + ghi Outbox `order.status_updated {orderId,userId,previousStatus,status}`.
-- Checkout tự động đưa đơn `PENDING → PROCESSING`. **Không có code nào tự chuyển `PROCESSING → PAID`**: sự kiện `payment_succeeded` do Payment emit tới Orders nhưng **Orders chưa có `@EventPattern` nhận** → bước PAID hiện phải do admin gọi PATCH. Đây là gap quan trọng nhất của state machine.
+- Checkout tự động đưa đơn `PENDING → PROCESSING`. Sự kiện `payment_succeeded` do Payment emit được Orders nhận (`PaymentEventsController`) và tự chuyển `PROCESSING → PAID` (kèm Outbox `order.status_updated` nên Notification gửi thêm mail). Event có thể tới khi đơn còn `PENDING` nên handler chờ thử lại ngắn; nếu vẫn không kịp, đơn ở `PROCESSING` và admin PATCH thủ công.
 - **Lưu ý**: Cancel thủ công (`→ CANCELLED`) **không** hoàn kho và **không** hoàn tiền (chỉ checkout-fail mới có compensation).
 
 ### 2.6 Hoàn tiền (Refund)
@@ -182,7 +182,7 @@ Admin ─ POST /refunds/:id/reject → refund PENDING → REJECTED
    ├ tìm PaymentTransaction theo idempotencyKey → có rồi: trả kết quả đã lưu (không gọi provider)
    ├ provider.charge(orderId, amount)  (hiện: SimulatedPaymentProvider luôn success, transactionId "SIMULATED-{orderId}")
    ├ lưu PaymentTransaction(SUCCEEDED|FAILED, failureReason)
-   └ emit payment_succeeded | payment_failed → Orders (hiện chưa có consumer)
+   └ emit payment_succeeded | payment_failed → Orders (`PaymentEventsController`)
 
 (Ngoài) Provider ─ POST /webhooks/payments {payload, signature} ─▶ Gateway (KHÔNG JwtAuth) ─▶ Payment.HANDLE_WEBHOOK
    ├ verifyWebhook: HMAC-SHA256(JSON.stringify(payload), PAYMENT_WEBHOOK_SECRET) so với signature → sai = 400

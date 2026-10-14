@@ -44,7 +44,7 @@ Step 4: Confirm & Publish Event (TRANSACTION #2)
 1. **Cửa sổ lỗi S1→S2 / S2→S3**: crash process sau khi đã trừ kho nhưng trước khi có order (hoặc order kẹt `PENDING`) → kho bị trừ mà không có dấu vết/compensation, chưa có job quét đơn `PENDING` quá hạn. Là hệ quả của saga không có state bền.
 2. **Payment charge thành công nhưng phản hồi timeout**: Orders coi là fail → huỷ đơn + hoàn kho, trong khi tiền đã trừ. Idempotency key giúp lần retry trả đúng kết quả cũ, nhưng chưa có job đối soát.
 3. **Outbox `FAILED`** sau 5 lần: không alert/replay; ngoài ra `emit` TCP không ack nên thực tế at-most-once (xem mục 2).
-4. **`payment_succeeded/failed`** do Payment emit không có consumer ở Orders → `PROCESSING→PAID` chỉ xảy ra bằng PATCH thủ công.
+4. **`payment_succeeded/failed`** do Payment emit được `PaymentEventsController` ở Orders nhận: `payment_succeeded` → `PROCESSING→PAID` (chờ thử lại nếu đơn còn PENDING), `payment_failed` → chỉ log.
 
 **Sơ đồ flow**:
 ```

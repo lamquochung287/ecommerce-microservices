@@ -1,0 +1,58 @@
+{
+  "uid": "k6-load-test",
+  "title": "k6 Load Test",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "tags": ["k6", "loadtest"],
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "VUs và RPS",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "legendFormat": "VUs", "expr": "k6_vus" },
+        { "refId": "B", "legendFormat": "RPS", "expr": "sum(rate(k6_http_reqs_total[30s]))" }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Tỉ lệ lỗi server (5xx / timeout / 429)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "server errors", "expr": "k6_lt_server_errors_rate" }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latency p95 theo nhóm",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ms", "min": 0 }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "legendFormat": "login", "expr": "k6_lt_login_duration_p95" },
+        { "refId": "B", "legendFormat": "browse", "expr": "k6_lt_browse_duration_p95" },
+        { "refId": "C", "legendFormat": "cart", "expr": "k6_lt_cart_duration_p95" },
+        { "refId": "D", "legendFormat": "checkout", "expr": "k6_lt_checkout_duration_p95" }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Checkout: thành công vs bị từ chối",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "legendFormat": "ok /s", "expr": "rate(k6_lt_checkout_ok_total[30s])" },
+        { "refId": "B", "legendFormat": "rejected /s", "expr": "rate(k6_lt_checkout_rejected_total[30s])" }
+      ]
+    }
+  ]
+}

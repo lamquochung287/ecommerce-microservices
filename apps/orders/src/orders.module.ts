@@ -2,8 +2,10 @@ import { Module } from '@nestjs/common';
 import { CqrsModule } from '@nestjs/cqrs';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { OrdersController } from './orders.controller';
+import { PaymentEventsController } from './payment-events.controller';
 import { CreateOrderHandler } from './commands/handlers/create-order.handler';
 import { UpdateOrderStatusHandler } from './commands/handlers/update-order-status.handler';
+import { ConfirmOrderPaymentHandler } from './commands/handlers/confirm-order-payment.handler';
 import { CreateRefundHandler } from './commands/handlers/create-refund.handler';
 import { ApproveRefundHandler } from './commands/handlers/approve-refund.handler';
 import { RejectRefundHandler } from './commands/handlers/reject-refund.handler';
@@ -26,6 +28,7 @@ import { CartModule } from './cart/cart.module';
 export const CommandHandlers = [
 	CreateOrderHandler,
 	UpdateOrderStatusHandler,
+	ConfirmOrderPaymentHandler,
 	CreateRefundHandler,
 	ApproveRefundHandler,
 	RejectRefundHandler,
@@ -49,7 +52,7 @@ export const EventHandlers = [OrderCreatedHandler];
 		SagaModule,
 		CartModule,
 	],
-	controllers: [OrdersController],
+	controllers: [OrdersController, PaymentEventsController],
 	providers: [...CommandHandlers, ...QueryHandlers, ...EventHandlers],
 })
 export class OrdersModule {}

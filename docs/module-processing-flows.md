@@ -171,7 +171,7 @@ Order **không lưu `paymentTransactionId`** và không lưu voucher/discount.
 | `get_transaction` | GetTransactionHandler | giao dịch mới nhất của `orderId`, trả `null` nếu chưa có |
 
 ### Charge
-`findOne(idempotencyKey)` → có: trả lại (log warn). Không: `provider.charge` → lưu `PaymentTransaction` → `orderClient.emit(payment_succeeded|payment_failed, {orderId,transactionId,amount,failureReason})` → trả `{success,transactionId,failureReason?}`.
+`findOne(idempotencyKey)` → có: trả lại (log warn). Không: `provider.charge` → lưu `PaymentTransaction` → `orderClient.emit(payment_succeeded|payment_failed, {orderId,transactionId,amount,failureReason})` → trả `{success,transactionId,failureReason?}`. Orders nhận event: `payment_succeeded` → PROCESSING→PAID, `payment_failed` → chỉ log (Saga đã hoàn kho + CANCELLED).
 - Race: 2 request cùng key đồng thời cùng qua bước `findOne` → cả hai gọi provider; **DB unique** chỉ chặn bản ghi thứ hai (lỗi 'Payment already processed…') **sau khi đã charge 2 lần** với provider thật. Với provider giả lập không hậu quả; với provider thật cần gửi idempotency key sang provider hoặc lock theo key.
 - `PaymentTransactionStatus` chỉ có `SUCCEEDED|FAILED` (chưa có PENDING/REFUNDED).
 

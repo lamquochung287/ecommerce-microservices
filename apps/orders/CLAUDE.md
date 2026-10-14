@@ -15,13 +15,13 @@ Chi tiết: [docs/business-flows.md §2.4–2.6](../../docs/business-flows.md), 
 4. **Tx#2**: Order `PROCESSING` + ghi Outbox `order.created`.
 
 ## State machine (`order-status.constant.ts`, dùng `canTransition`)
-PENDING→{PROCESSING,CANCELLED} · PROCESSING→{PAID,CANCELLED} · PAID→{SHIPPED,CANCELLED} · SHIPPED→DELIVERED · DELIVERED→REFUNDED · CANCELLED/REFUNDED cuối. `UpdateOrderStatus` = 1 transaction (đổi status + Outbox `order.status_updated`). **Không có code tự chuyển PROCESSING→PAID** (Orders chưa nghe `payment_succeeded`). Cancel thủ công **không** hoàn kho/tiền.
+PENDING→{PROCESSING,CANCELLED} · PROCESSING→{PAID,CANCELLED} · PAID→{SHIPPED,CANCELLED} · SHIPPED→DELIVERED · DELIVERED→REFUNDED · CANCELLED/REFUNDED cuối. `UpdateOrderStatus` = 1 transaction (đổi status + Outbox `order.status_updated`). `PaymentEventsController` nghe `payment_succeeded` → `ConfirmOrderPaymentCommand` tự chuyển PROCESSING→PAID qua `UpdateOrderStatus` (event có thể tới khi đơn còn PENDING nên chờ thử lại tối đa ~3s; đơn đã PAID trở đi thì bỏ qua; đơn CANCELLED chỉ log cảnh báo cần hoàn tiền thủ công). `payment_failed` chỉ log vì Saga đã hoàn kho + CANCELLED đồng bộ. Lỗi từ Product (vd 409 hết hàng) được `InventoryReservationService` bọc lại thành `RpcException` để Gateway trả đúng mã. Cancel thủ công **không** hoàn kho/tiền.
 
 ## Refund
 Tạo khi order ∈ {PAID,SHIPPED,DELIVERED}; Σ refund không-REJECTED + amount ≤ `totalAmount`. Approve (transaction): PENDING→COMPLETED, đủ tổng & `canTransition→REFUNDED` thì Order=REFUNDED. Reject: PENDING→REJECTED. Chưa hoàn tiền thật/hoàn kho; chưa lock chống race.
 
 ## OutboxWorker
-`@Cron` mỗi giây, 20 row `PENDING`/lần, `emit` tới Orders-chính-nó (không handler) + Notification, đánh dấu `PUBLISHED` ngay → **at-most-once**; `retryCount` ≥5 → `FAILED` (không alert/replay). Thêm subscriber = thêm `ClientProxy` vào `subscribers`. Nhiều instance → phát trùng.
+`@Cron` mỗi giây, 20 row `PENDING`/lần, `emit` tới Notification, đánh dấu `PUBLISHED` ngay → **at-most-once**; `retryCount` ≥5 → `FAILED` (không alert/replay). Thêm subscriber = thêm `ClientProxy` vào `subscribers`. Nhiều instance → phát trùng.
 
 ## Quy tắc
 - Event ra ngoài phải đi **Outbox cùng transaction** với thay đổi state, không `emit` trực tiếp trong handler.
