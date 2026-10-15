@@ -4,6 +4,7 @@ import { BrandController } from './brand.controller';
 import { AttributeController } from './attribute.controller';
 import { VariantController } from './variant.controller';
 import { ProductService } from './product.service';
+import { InventoryService } from './inventory.service';
 
 @Module({
 	imports: [],
@@ -13,7 +14,7 @@ import { ProductService } from './product.service';
 		AttributeController,
 		VariantController,
 	],
-	providers: [ProductService],
+	providers: [ProductService, InventoryService],
 	exports: [ProductService],
 })
 export class ProductModule {}

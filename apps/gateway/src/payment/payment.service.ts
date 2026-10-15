@@ -35,6 +35,23 @@ export class PaymentService {
 		);
 	}
 
+	getIntent(intentId: string) {
+		return this.send(
+			PAYMENT_MESSAGE_PATTERN.GET_INTENT,
+			{ intentId },
+			'get payment intent',
+		);
+	}
+
+	/** Payment dựng sẵn `{payload, signature}` (đã ký HMAC) để Gateway chuyển nguyên vẹn vào webhook. */
+	simulatePayment(intentId: string, result: 'success' | 'fail') {
+		return this.send(
+			PAYMENT_MESSAGE_PATTERN.SIMULATE_PAYMENT,
+			{ intentId, result },
+			'simulate payment',
+		);
+	}
+
 	getTransaction(orderId: string) {
 		return this.send(
 			PAYMENT_MESSAGE_PATTERN.GET_TRANSACTION,

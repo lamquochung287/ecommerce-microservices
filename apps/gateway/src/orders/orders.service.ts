@@ -13,6 +13,7 @@ import {
 } from '../../../orders/src/dto/order.dto';
 import { CreateRefundDto } from '../../../orders/src/dto/refund.dto';
 import { CartItemDto } from '../../../orders/src/cart/cart-item.dto';
+import { CheckoutDto } from '../../../orders/src/dto/checkout.dto';
 
 @Injectable()
 export class OrdersService {
@@ -37,6 +38,39 @@ export class OrdersService {
 
 	createOrder(dto: CreateOrderDto) {
 		return this.send(ORDER_MESSAGE_PATTERN.CREATE_ORDER, dto, 'create order');
+	}
+
+	/** `userId` luôn lấy từ token; Orders tự lấy số lượng từ cart và giá từ Product. */
+	checkout(userId: string, dto: CheckoutDto) {
+		return this.send(
+			ORDER_MESSAGE_PATTERN.CHECKOUT,
+			{ userId, dto },
+			'checkout',
+		);
+	}
+
+	getPaymentLink(orderId: string, userId: string) {
+		return this.send(
+			ORDER_MESSAGE_PATTERN.GET_PAYMENT_LINK,
+			{ orderId, userId },
+			'get payment link',
+		);
+	}
+
+	cancelOrder(orderId: string, userId: string) {
+		return this.send(
+			ORDER_MESSAGE_PATTERN.CANCEL_ORDER,
+			{ orderId, userId },
+			'cancel order',
+		);
+	}
+
+	requestReturn(orderId: string, userId: string, reason: string) {
+		return this.send(
+			ORDER_MESSAGE_PATTERN.REQUEST_RETURN,
+			{ orderId, userId, reason },
+			'request return',
+		);
 	}
 
 	getOrders(userId?: string) {

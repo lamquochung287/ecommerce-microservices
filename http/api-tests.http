@@ -207,3 +207,108 @@ GET {{baseUrl}}/orders
 x-api-key: {{apiKey}}
 Authorization: Bearer {{accessToken}}
 Accept: application/json
+
+# =========================================================================
+# Checkout v2 (chọn món, idempotency bắt buộc, thanh toán simulator)
+# =========================================================================
+
+###
+# @name AddCartItem
+# Thêm món vào giỏ (số lượng do giỏ giữ, checkout không gửi quantity/giá/userId)
+POST {{baseUrl}}/cart/items
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "productId": "{{productId}}",
+  "quantity": 1
+}
+
+###
+# @name Checkout
+# Bắt buộc x-idempotency-key (thiếu -> 400). Trả {orderId, status, payment_url, expiresAt}
+POST {{baseUrl}}/cart/checkout
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+x-idempotency-key: checkout-{{$guid}}
+Content-Type: application/json
+
+{
+  "items": [{ "productId": "{{productId}}" }],
+  "shippingAddress": {
+    "recipientName": "Nguyen Van A",
+    "recipientPhone": "0900000000",
+    "addressLine1": "1 Nguyen Hue",
+    "city": "Ho Chi Minh",
+    "country": "VN"
+  },
+  "voucherCode": "SALE10"
+}
+
+###
+@orderId = {{Checkout.response.body.$.data.orderId}}
+
+###
+# @name GetPaymentLink
+# Chốt kiểm tra còn giữ hàng; trả {paymentUrl, expiresAt}
+GET {{baseUrl}}/orders/{{orderId}}/pay
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+
+###
+# @name SimulatorPage
+# Trình duyệt không gửi x-api-key; trang tắt (404) khi NODE_ENV=production
+@intentId = replace-with-intent-id-from-paymentUrl
+GET {{baseUrl}}/simulator/pay/{{intentId}}
+
+###
+# @name SimulatorPaySuccess
+POST {{baseUrl}}/simulator/pay/{{intentId}}/success
+
+###
+# @name SimulatorPayFail
+POST {{baseUrl}}/simulator/pay/{{intentId}}/fail
+
+###
+# @name CancelOrder
+POST {{baseUrl}}/orders/{{orderId}}/cancel
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+
+###
+# @name RequestReturn
+# Chỉ đơn DELIVERED trong cửa sổ đổi trả
+POST {{baseUrl}}/orders/{{orderId}}/return
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "reason": "Sản phẩm lỗi"
+}
+
+###
+# @name ShipmentDeliver
+# Admin/mô phỏng: đánh dấu đã giao (cần quyền ORDER/UPDATE)
+POST {{baseUrl}}/shipments/{{orderId}}/deliver
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+
+###
+# @name GetShipment
+GET {{baseUrl}}/shipments/{{orderId}}
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+
+###
+# @name AdjustStock
+# Tồn kho do Inventory quản lý
+POST {{baseUrl}}/products/{{productId}}/stock-adjustments
+x-api-key: {{apiKey}}
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "delta": 10
+}

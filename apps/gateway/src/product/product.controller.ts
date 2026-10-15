@@ -10,8 +10,9 @@ import {
 	UseInterceptors,
 	UploadedFile,
 	Query,
+	ParseUUIDPipe,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiTags, OmitType } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { PermissionGuard } from '../common/guard/permission.guard';
@@ -23,8 +24,19 @@ import {
 	GetProductsFilterDto,
 	UpdateProductDto,
 } from '../../../product/src/dto/product.dto';
-import { AdjustStockDto } from '../../../product/src/dto/product-variant.dto';
+import { AdjustStockDto } from '../../../inventory/src/dto/inventory.dto';
 import { MediaService } from '@lib/media';
+import { InventoryService } from './inventory.service';
+
+// Body không có productId (lấy từ path) nhưng vẫn giữ decorator validate của AdjustStockDto.
+class AdjustStockBodyDto extends OmitType(AdjustStockDto, [
+	'productId',
+] as const) {}
+
+interface ProductWithId {
+	id: string;
+	[key: string]: unknown;
+}
 
 @ApiTags('Products')
 @Controller('products')
@@ -32,6 +44,7 @@ import { MediaService } from '@lib/media';
 export class ProductController {
 	constructor(
 		private readonly productService: ProductService,
+		private readonly inventoryService: InventoryService,
 		private readonly mediaService: MediaService,
 	) {}
 
@@ -43,14 +56,34 @@ export class ProductController {
 
 	@Get()
 	@RequirePermission(ModuleName.PRODUCT, Action.READ)
-	getProducts(@Query() filter: GetProductsFilterDto) {
-		return this.productService.getProducts(filter);
+	async getProducts(@Query() filter: GetProductsFilterDto) {
+		const page = (await this.productService.getProducts(filter)) as
+			| { data?: ProductWithId[]; meta?: unknown }
+			| undefined;
+		const items = page?.data ?? [];
+		// Một lần gọi Inventory cho cả trang; Inventory lỗi thì mọi item là UNKNOWN (không ném lỗi).
+		const stock = await this.inventoryService.getStockInfo(
+			items.map((item) => item.id),
+		);
+		return {
+			...page,
+			data: items.map((item) => ({
+				...item,
+				...InventoryService.stockInfoOf(stock, item.id),
+			})),
+		};
 	}
 
 	@Get(':id')
 	@RequirePermission(ModuleName.PRODUCT, Action.READ)
-	getProduct(@Param('id') id: string) {
-		return this.productService.getProduct(id);
+	async getProduct(@Param('id') id: string) {
+		const product = (await this.productService.getProduct(id)) as
+			| ProductWithId
+			| null
+			| undefined;
+		if (!product) return product;
+		const stock = await this.inventoryService.getStockInfo([product.id]);
+		return { ...product, ...InventoryService.stockInfoOf(stock, product.id) };
 	}
 
 	@Put(':id')
@@ -68,10 +101,10 @@ export class ProductController {
 	@Post(':id/stock-adjustments')
 	@RequirePermission(ModuleName.PRODUCT, Action.UPDATE)
 	adjustStock(
-		@Param('id') id: string,
-		@Body() dto: Omit<AdjustStockDto, 'productId'>,
+		@Param('id', new ParseUUIDPipe()) id: string,
+		@Body() dto: AdjustStockBodyDto,
 	) {
-		return this.productService.adjustStock({ ...dto, productId: id });
+		return this.inventoryService.adjustStock({ ...dto, productId: id });
 	}
 
 	@Get(':id/variants')

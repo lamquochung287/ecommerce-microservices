@@ -18,7 +18,6 @@ import {
 	UpdateAttributeDto,
 } from '../../../product/src/dto/attribute.dto';
 import {
-	AdjustStockDto,
 	CreateVariantDto,
 	UpdateVariantDto,
 } from '../../../product/src/dto/product-variant.dto';
@@ -82,10 +81,6 @@ export class ProductService {
 			{ id },
 			'delete product',
 		);
-	}
-
-	adjustStock(dto: AdjustStockDto) {
-		return this.send(PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK, dto, 'adjust stock');
 	}
 
 	createBrand(dto: CreateBrandDto) {

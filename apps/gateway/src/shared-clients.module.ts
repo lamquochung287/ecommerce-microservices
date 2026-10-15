@@ -62,6 +62,22 @@ import { NAME_SERVICE_TCP, PORT_TCP } from 'libs/constant/port-tcp.constant';
 					port: PORT_TCP.PROMOTION_TCP_PORT,
 				},
 			},
+			{
+				name: NAME_SERVICE_TCP.INVENTORY_SERVICE,
+				transport: Transport.TCP,
+				options: {
+					host: 'localhost',
+					port: PORT_TCP.INVENTORY_TCP_PORT,
+				},
+			},
+			{
+				name: NAME_SERVICE_TCP.SHIPPING_SERVICE,
+				transport: Transport.TCP,
+				options: {
+					host: 'localhost',
+					port: PORT_TCP.SHIPPING_TCP_PORT,
+				},
+			},
 		]),
 	],
 	exports: [ClientsModule],

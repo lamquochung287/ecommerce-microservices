@@ -3,7 +3,7 @@ import { ClientProxy } from '@nestjs/microservices';
 import { firstValueFrom, timeout } from 'rxjs';
 import * as CircuitBreaker from 'opossum';
 
-const TIMEOUT_MS = 10000;
+export const DEFAULT_TCP_TIMEOUT_MS = 10000;
 const BREAKER_OPTIONS: CircuitBreaker.Options = {
 	timeout: false, // timeout đã xử lý bằng RxJS timeout() ở gọi client.send, breaker chỉ đếm success/fail
 	errorThresholdPercentage: 50, // mở breaker khi >50% request lỗi trong rolling window
@@ -29,7 +29,8 @@ export class TcpResilienceService {
 			client: ClientProxy,
 			pattern: Record<string, unknown>,
 			data: unknown,
-		) => firstValueFrom(client.send(pattern, data).pipe(timeout(TIMEOUT_MS)));
+			timeoutMs: number,
+		) => firstValueFrom(client.send(pattern, data).pipe(timeout(timeoutMs)));
 		const breaker: CircuitBreaker<any, unknown> = new CircuitBreaker(
 			call,
 			BREAKER_OPTIONS,
@@ -58,14 +59,16 @@ export class TcpResilienceService {
 	/**
 	 * Gọi TCP microservice qua circuit breaker dùng chung theo serviceKey.
 	 * Ném lỗi gốc (timeout/RpcException/breaker-open) để caller tự xử lý qua MicroserviceErrorHandler.
+	 * `timeoutMs` áp dụng riêng cho lần gọi này (breaker vẫn dùng chung theo serviceKey).
 	 */
 	async send<T>(
 		serviceKey: string,
 		client: ClientProxy,
 		pattern: Record<string, unknown>,
 		data: unknown,
+		timeoutMs: number = DEFAULT_TCP_TIMEOUT_MS,
 	): Promise<T> {
 		const breaker = this.getBreaker(serviceKey);
-		return breaker.fire(client, pattern, data) as Promise<T>;
+		return breaker.fire(client, pattern, data, timeoutMs) as Promise<T>;
 	}
 }

@@ -7,12 +7,16 @@ import { CachedModule } from '@lib/cached';
 import { MediaModule } from '@lib/media';
 import { APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { IdempotencyInterceptor } from './common/interceptor/idempotency.interceptor';
-import { RequestTrackerMiddleware } from './common/middleware/request-tracker.middleware';
+import {
+	API_KEY_EXEMPT_ROUTES,
+	RequestTrackerMiddleware,
+} from './common/middleware/request-tracker.middleware';
 import { TransformInterceptor } from './common/interceptor/transform.interceptor';
 import { CommonConfigModule } from '@lib/common';
 import { ProductModule } from './product/product.module';
 import { OrdersModule } from './orders/orders.module';
 import { PaymentModule } from './payment/payment.module';
+import { ShippingModule } from './shipping/shipping.module';
 import { ReviewModule } from './review/review.module';
 import { PromotionModule } from './promotion/promotion.module';
 import { HealthModule } from './health/health.module';
@@ -37,6 +41,7 @@ const isAuthRoute = (context: ExecutionContext) =>
 		ProductModule,
 		OrdersModule,
 		PaymentModule,
+		ShippingModule,
 		ReviewModule,
 		PromotionModule,
 		HealthModule,
@@ -89,6 +94,9 @@ const isAuthRoute = (context: ExecutionContext) =>
 })
 export class GatewayModule implements NestModule {
 	configure(consumer: MiddlewareConsumer) {
-		consumer.apply(RequestTrackerMiddleware).exclude('health').forRoutes('*');
+		consumer
+			.apply(RequestTrackerMiddleware)
+			.exclude(...API_KEY_EXEMPT_ROUTES)
+			.forRoutes('*');
 	}
 }
