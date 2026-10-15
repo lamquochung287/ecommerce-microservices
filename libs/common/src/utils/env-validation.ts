@@ -125,6 +125,12 @@ export class EnvironmentVariables {
 	@Min(1)
 	ORDER_RETURN_WINDOW_DAYS?: number;
 
+	// Số đơn mỗi lượt quét của scheduler (huỷ đơn quá hạn, tự hoàn tất); mặc định 100, mỗi đơn một transaction
+	@IsOptional()
+	@IsNumber()
+	@Min(1)
+	ORDER_LIFECYCLE_BATCH_SIZE?: number;
+
 	// Khoá HMAC của webhook giao hàng; bắt buộc, không có giá trị mặc định.
 	@IsNotEmpty()
 	@IsString()

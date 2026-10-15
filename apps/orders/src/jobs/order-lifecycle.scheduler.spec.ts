@@ -1,6 +1,7 @@
 // mock.calls của jest.fn() có kiểu any.
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment */
 import { Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CommandBus } from '@nestjs/cqrs';
 import { CompleteDeliveredOrdersCommand } from '../commands/complete-delivered-orders.command';
 import { ExpirePendingOrdersCommand } from '../commands/expire-pending-orders.command';
@@ -18,6 +19,10 @@ jest.mock('@nestjs/schedule', () => ({
 	},
 }));
 
+// Không đặt biến env thì ConfigService trả undefined và scheduler dùng giá trị mặc định.
+const config = (values: Record<string, unknown> = {}) =>
+	({ get: (key: string) => values[key] }) as unknown as ConfigService;
+
 describe('OrderLifecycleScheduler', () => {
 	beforeAll(() => {
 		jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
@@ -28,6 +33,7 @@ describe('OrderLifecycleScheduler', () => {
 		const commandBus = { execute: jest.fn().mockResolvedValue({}) };
 		const scheduler = new OrderLifecycleScheduler(
 			commandBus as unknown as CommandBus,
+			config(),
 		);
 		await scheduler.expirePendingOrders();
 
@@ -37,10 +43,21 @@ describe('OrderLifecycleScheduler', () => {
 		expect(ORDER_LIFECYCLE_BATCH_SIZE).toBe(100);
 	});
 
+	it('batch đọc từ ORDER_LIFECYCLE_BATCH_SIZE khi có đặt', async () => {
+		const commandBus = { execute: jest.fn().mockResolvedValue({}) };
+		const scheduler = new OrderLifecycleScheduler(
+			commandBus as unknown as CommandBus,
+			config({ ORDER_LIFECYCLE_BATCH_SIZE: '500' }),
+		);
+		await scheduler.expirePendingOrders();
+		expect(commandBus.execute.mock.calls[0][0].batchSize).toBe(500);
+	});
+
 	it('tự hoàn tất gửi CompleteDeliveredOrdersCommand', async () => {
 		const commandBus = { execute: jest.fn().mockResolvedValue({}) };
 		const scheduler = new OrderLifecycleScheduler(
 			commandBus as unknown as CommandBus,
+			config(),
 		);
 		await scheduler.completeDeliveredOrders();
 		expect(commandBus.execute.mock.calls[0][0]).toBeInstanceOf(
@@ -57,6 +74,7 @@ describe('OrderLifecycleScheduler', () => {
 		};
 		const scheduler = new OrderLifecycleScheduler(
 			commandBus as unknown as CommandBus,
+			config(),
 		);
 
 		const first = scheduler.expirePendingOrders();
@@ -80,6 +98,7 @@ describe('OrderLifecycleScheduler', () => {
 		};
 		const scheduler = new OrderLifecycleScheduler(
 			commandBus as unknown as CommandBus,
+			config(),
 		);
 		await expect(scheduler.completeDeliveredOrders()).resolves.toBeUndefined();
 		await scheduler.completeDeliveredOrders();

@@ -81,6 +81,8 @@ services:
       SHIPPING_SIM_DELIVER_DELAY_MS: ${LT_SHIPPING_DELIVER_DELAY_MS:-5000}
       # Thời gian giữ hàng + hạn thanh toán (giây). Đặt ngắn để đo luôn nhánh hết hạn và trả kho.
       ORDER_PAYMENT_TTL_SECONDS: ${LT_ORDER_PAYMENT_TTL_SECONDS:-900}
+      # Số đơn mỗi lượt quét của scheduler (30s/lượt): tăng để dọn nhanh khi có nhiều đơn quá hạn.
+      ORDER_LIFECYCLE_BATCH_SIZE: ${LT_ORDER_LIFECYCLE_BATCH_SIZE:-100}
       # Các service gọi nhau qua 'localhost' (hardcode); trong container nó phân giải ra ::1 trước nên TCP bị từ chối.
       NODE_OPTIONS: --dns-result-order=ipv4first
       # Mặc định 50/service × 10 service vượt xa max_connections=100 của Postgres.
