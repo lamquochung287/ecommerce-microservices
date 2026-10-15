@@ -1,15 +1,15 @@
 # Tổng quan Dự án - Product Development Requirements (PDR)
 
-**Ngày cập nhật**: 2026-09-28  
-**Trạng thái**: Early-stage (Phase 00/01/02 được implement)
+**Ngày cập nhật**: 2026-10-15  
+**Trạng thái**: Early-stage (Phase 00/01/02 + checkout v2 event-driven đã viết code; checkout v2 chưa kiểm chứng trên stack thật)
 
 ## Mô tả Dự án
 
 Hệ thống **Ecommerce Microservices** là một nền tảng thương mại điện tử (web-based) được thiết kế theo kiến trúc Microservices bằng NestJS. Dự án nhằm cung cấp một cơ sở học tập toàn diện về các nguyên lý xây dựng hệ thống backend phức tạp, bao gồm:
 
-- Kiến trúc Microservices phân tán với giao tiếp qua TCP
-- Quản lý dữ liệu phân tán và tính consistency
-- Xây dựng Saga pattern cho các giao dịch phức tạp
+- Kiến trúc Microservices phân tán: RPC đồng bộ qua TCP, event/command bất đồng bộ qua Kafka
+- Quản lý dữ liệu phân tán và tính consistency (Outbox/Inbox, optimistic/pessimistic locking)
+- Orchestration event-driven cho giao dịch phức tạp (checkout → thanh toán → kho → vận chuyển)
 - Caching, session management, và observability
 
 Dự án chạy toàn bộ trên **localhost** (Docker Compose), không dùng AWS hoặc hosting public — tập trung vào học tập và phát triển.
@@ -44,29 +44,29 @@ Dự án chạy toàn bộ trên **localhost** (Docker Compose), không dùng AW
 - **Công nghệ**:
   - Optimistic locking (@VersionColumn) để tránh race condition khi điều chỉnh stock
   - Soft-delete cho sản phẩm
-  - CQRS pattern (commands: CRUD, AdjustStock; queries: GetProducts, GetProduct...)
+  - CQRS pattern (commands: CRUD; queries: GetProducts, GetProduct...) — chỉ catalog, tồn kho thuộc Inventory
   - Hình ảnh sản phẩm lưu dạng JSONB (tên file MinIO)
   - **Roadmap**: Redis caching cho product catalog (hiện chưa có)
 
 ### 3. Shopping Cart & Orders (`apps/orders`)
 - **Chức năng chính**:
   - Quản lý giỏ hàng (cart): thêm/xóa/update sản phẩm, calculate total
-  - Tạo đơn hàng (create order) thông qua Saga pattern phức tạp:
-    1. Reserve inventory từ Product service
-    2. Tạo Order & OrderItem trong DB (status = PENDING)
-    3. Charge payment từ Payment service (idempotency key = order.id)
-    4. Nếu lỗi → Compensation: release inventory + cancel order
-    5. Nếu thanh toán thành công → status = PROCESSING + ghi Outbox event
-  - Quản lý trạng thái đơn hàng (state machine): PENDING → PROCESSING → PAID → SHIPPED → DELIVERED
-  - Hỗ trợ hủy đơn, hoàn hàng/refund với compensation
-  - Transactional Outbox pattern: tách tạo Order + ghi Outbox vào cùng 1 DB transaction để đảm bảo no-lost-event
+  - Checkout v2 (`POST /cart/checkout`, chọn món, `x-idempotency-key` bắt buộc):
+    1. Pricing server-side (giá từ Product, số lượng từ cart, voucher)
+    2. Inventory reserve hàng 15' (TCP) → Order `PENDING_PAYMENT` + Outbox (cùng transaction)
+    3. Kiểm tra còn hàng (chốt #1) → Payment tạo intent → trả `payment_url`
+    4. Thanh toán qua webhook HMAC (simulator) → `PAID` → Inventory commit → `FULFILLING` → Shipping tạo vận đơn → `SHIPPED` → `DELIVERED` → `COMPLETED` (scheduler 7 ngày)
+    5. Lỗi → `CANCELLED` + trả kho / hoàn tiền (trừ phí ship) tuỳ giai đoạn
+  - State machine: PENDING_PAYMENT → PAID → FULFILLING → SHIPPED → DELIVERED → COMPLETED (+CANCELLED, +REFUNDING → REFUNDED)
+  - Huỷ đơn khi chưa ship, hoàn hàng trong 7 ngày sau giao (chỉ cả đơn)
+  - Transactional Outbox + Inbox (Kafka, at-least-once): đổi state + ghi Outbox cùng 1 DB transaction; consumer khử trùng theo `eventId`
 
 - **Công nghệ**:
   - Cart lưu trên Redis (key: `cart:{userId}`, TTL 30 ngày)
   - CQRS pattern với event sourcing simulation
-  - Outbox pattern + polling worker (@Cron EVERY_SECOND) để fan-out events
+  - Outbox relay (`libs/messaging`, `FOR UPDATE SKIP LOCKED`) đẩy Kafka; scheduler hết hạn 15' và auto COMPLETED
   - State machine enforcement (ORDER_STATUS_TRANSITIONS constant)
-  - Idempotency key cho charge payment (tránh double-charge)
+  - Idempotency: Gateway (`x-idempotency-key`), Payment (`idempotencyKey = orderId`), Kafka consumer (Inbox)
 
 ### 4. Payment Processing (`apps/payment`)
 - **Chức năng chính**:
@@ -149,7 +149,7 @@ Dự án chạy toàn bộ trên **localhost** (Docker Compose), không dùng AW
 | **No Public Deployment** | Project học tập, chỉ chạy localhost — không cần K8s, container registry, hosting |
 | **No SMS OTP** | Dùng email OTP thay thế (đã chốt) |
 | **Simulate First Strategy** | Payment/Email/Push dùng simulate provider trước, real provider sau (optional) |
-| **No RabbitMQ** | Giao tiếp dùng TCP point-to-point, không message broker (RabbitMQ deps là dead code) |
+| **No RabbitMQ** | RPC dùng TCP; event/command dùng Kafka (đảo quyết định "không broker" ngày 2026-10-15); RabbitMQ deps là dead code |
 
 ## Timeline & Phases
 
@@ -157,8 +157,9 @@ Xem chi tiết tại [`docs/project-roadmap.md`](./project-roadmap.md) và [`pla
 
 Tóm tắt:
 - **Phase 0**: Infrastructure, health check, DB migration, Outbox pattern (DONE)
-- **Phase 1**: Inventory, Cart, Saga, RBAC (DONE)
+- **Phase 1**: Inventory, Cart, Saga, RBAC (DONE; Saga nay đã thay bằng checkout v2)
 - **Phase 2**: Payment, Notification, Review, Promotion, Media (DONE)
+- **Checkout v2** (cutover 2026-10-15): Kafka, Inventory, Shipping, payment intent, voucher, huỷ/hoàn hàng — code xong, chưa kiểm chứng trên stack thật
 - **Phase 3**: Production hardening, observability wiring, API docs (TODO)
 
 ## Acceptance Criteria
@@ -166,7 +167,7 @@ Tóm tắt:
 Mỗi phase phải đạt:
 - ✅ Tất cả checklist trong phase file được check
 - ✅ Không phụ thuộc AWS
-- ✅ Saga/Order flow có idempotency + compensation, verify bằng test
+- ✅ Luồng checkout có idempotency + bù trừ (release/restock/refund), verify bằng unit test (mock); e2e trên stack thật: chưa
 - ✅ Health check + graceful shutdown hoạt động
 - ✅ Simulate provider chạy end-to-end (không cần API key thật)
 - ✅ Test coverage ≥70% cho code mới

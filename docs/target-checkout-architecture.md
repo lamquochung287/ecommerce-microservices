@@ -1,7 +1,7 @@
 # Target Architecture — Checkout, Fulfillment & Event-driven Orchestration
 
 **Ngày cập nhật**: 2026-10-15
-**Trạng thái**: 🎯 **THIẾT KẾ ĐÍCH — CHƯA IMPLEMENT.** Code hiện tại vẫn là Saga đồng bộ (xem [business-flows.md §2.4](./business-flows.md), [system-architecture-orders-flow.md](./system-architecture-orders-flow.md)). Tài liệu này là hợp đồng để lập plan; khi từng phần được code xong thì chuyển sang business-flows/module-processing-flows và đánh dấu ở §10.
+**Trạng thái**: ✅ **ĐÃ IMPLEMENT (code) — CHƯA KIỂM CHỨNG TRÊN STACK THẬT.** Cutover một lần đã thực hiện ở mức code: Saga đồng bộ cũ đã xoá, 10 app `nest build` xanh, unit test (mock) xanh. Migration, int-spec (Postgres), seed, load test k6 và e2e qua Kafka thật **chưa chạy** (bị cấm chạm DB trong lần cutover này). Luồng + rule hiện hành: [business-flows.md](./business-flows.md), [module-processing-flows.md](./module-processing-flows.md), [system-architecture-orders-flow.md](./system-architecture-orders-flow.md). Bảng trạng thái chi tiết ở §10; các điểm triển khai khác thiết kế gốc ở §10.2.
 
 ## 1. Vì sao đổi
 
@@ -18,7 +18,7 @@ Thiết kế đích: Order là **orchestrator** điều phối bằng event/comm
 
 | Quyết định | Chốt | Ghi chú |
 |---|---|---|
-| Transport event/command giữa service | **Kafka** | **Đảo quyết định "không dùng RabbitMQ/broker"** cho kênh bất đồng bộ. RPC đồng bộ (Gateway→service, validate/reserve) **vẫn TCP**. Cập nhật CLAUDE.md gốc khi bắt đầu implement. |
+| Transport event/command giữa service | **Kafka** | **Đảo quyết định "không dùng RabbitMQ/broker"** cho kênh bất đồng bộ. RPC đồng bộ (Gateway→service, validate/reserve) **vẫn TCP**. CLAUDE.md gốc đã cập nhật (§1, §2.1). |
 | Inventory | **App riêng `apps/inventory` (:3008)** | Tách khỏi Product; sở hữu `stock`, `reservation`. Product chỉ còn catalog. |
 | Shipping | **App riêng `apps/shipping` (:3009), carrier mô phỏng** | Theo phong cách Simulated + provider qua DI token. |
 | Payment / Carrier ngoài | **Không tích hợp bên ngoài, chỉ Simulated** | Mô phỏng đủ vòng đời intent + webhook có HMAC, xem §10.1. Thay cổng thật sau = thêm provider mới. |
@@ -28,7 +28,7 @@ Thiết kế đích: Order là **orchestrator** điều phối bằng event/comm
 | Độ tin cậy messaging | **At-least-once + Inbox**, retry 3 lần rồi DLQ | Không exactly-once. |
 | Chuyển đổi | **Cutover một lần** | Xoá Saga cũ khi luồng mới xong. |
 | Huỷ/hoàn | Chỉ **cả đơn**; hoàn tiền trừ phí ship; voucher không trả sau khi đã thanh toán | Huỷ khi chưa ship; hoàn hàng khi `DELIVERED` trong 7 ngày; `COMPLETED` thì khoá. |
-| Phạm vi lần này | **Chỉ cập nhật docs** | Chưa sửa code. |
+| Phạm vi lần này | ~~Chỉ cập nhật docs~~ → **đã implement toàn bộ (14 phase)** | Bản thiết kế này là nguồn; kết quả ở §10. |
 
 ## 3. State machine đơn hàng
 
@@ -81,7 +81,7 @@ Mỗi service ghi Outbox cùng transaction và có **Inbox** (`processed_message
 4. Validate: danh sách chọn không rỗng; mọi món phải có trong cart của user (không thì 400); không trùng `productId`. Các món **không được chọn** không bị đụng tới.
 5. FE nhận `{orderId, status: PENDING_PAYMENT, payment_url, expiresAt}` rồi chuyển user sang `payment_url`.
 
-Khác hiện tại: [cart.controller.ts](../apps/gateway/src/orders/cart.controller.ts) đang checkout **toàn bộ** giỏ và không nhận danh sách chọn; DTO `ShippingAddressDto` là body duy nhất.
+Đã implement: [cart.controller.ts](../apps/gateway/src/orders/cart.controller.ts) chỉ chuyển tiếp `{userId từ token, dto}`; `CheckoutDto` (`items`, `shippingAddress`, `voucherCode?`) ở `apps/orders/src/dto/checkout.dto.ts`. (Trước đây checkout toàn bộ giỏ và Gateway snapshot giá.)
 
 ```
 Client ─POST /cart/checkout (x-idempotency-key BẮT BUỘC)─► Gateway ─► Orders
@@ -234,21 +234,38 @@ Lệch version không bao giờ làm mất event: bên thua luôn đọc lại s
 
 ## 10. Phạm vi implement & trạng thái
 
-| Hạng mục | Trạng thái |
-|---|---|
-| State machine mới + migration | ⏳ Chưa làm |
-| Kafka + outbox relay at-least-once + inbox | ⏳ Chưa làm |
-| `apps/inventory` (reserve/commit/release + expiry) | ⏳ Chưa làm |
-| Payment `createIntent` + webhook→outbox + refund | ⏳ Chưa làm |
-| `apps/shipping` + carrier mô phỏng + webhook giao hàng | ⏳ Chưa làm |
-| Voucher nối checkout (validate → reserve → confirm/release) | ⏳ Chưa làm |
-| Refund: huỷ → `CANCELLED` + hoàn tiền ở Payment; hoàn hàng → `REFUNDING→REFUNDED` | ⏳ Chưa làm |
-| Scheduler hết hạn 15' + auto COMPLETED 7 ngày | ⏳ Chưa làm |
-| Gateway: checkout trả `payment_url`, idempotency bắt buộc | ⏳ Chưa làm |
+Cập nhật 2026-10-15 (sau cutover). ✅ = **code + unit test mock + build xanh**; chưa hạng mục nào được kiểm chứng trên Postgres/Kafka thật trừ phần ghi rõ.
 
-**Chuyển đổi: cutover một lần** — không feature flag, không chạy song song; Saga cũ (`CreateOrderHandler` đồng bộ) bị xoá khi luồng mới hoàn tất, kèm migration trạng thái đơn và chuyển stock sang Inventory.
+| Hạng mục | Trạng thái | Ghi chú kiểm chứng |
+|---|---|---|
+| State machine mới + migration | ✅ Đã làm | Migration `AddOrderLifecycleColumns` + `FinalizeOrderStatusAndStockOwnership`; **chưa chạy trên DB nào**; int-spec khoá lạc quan (TC-42) viết sẵn, chưa chạy |
+| Kafka + outbox relay at-least-once + inbox | ✅ Đã làm | `libs/messaging`; relay/producer **đã chạy int-spec trên Postgres + Kafka thật ở nền tảng** (5/5); các service dùng nó chưa chạy thật |
+| `apps/inventory` (reserve/commit/release + expiry) | ✅ Đã làm | Unit mock; SQL `unnest`/`NULLS NOT DISTINCT`/`FOR UPDATE OF` và int-spec (TC-22,25,26,27,35) chưa chạy |
+| Payment `createIntent` + webhook→outbox + refund | ✅ Đã làm | Unit mock; int-spec webhook/refund + migration `AddPaymentIntentAndRefund` chưa chạy |
+| `apps/shipping` + carrier mô phỏng + webhook giao hàng | ✅ Đã làm | Unit mock; int-spec + migration `AddShipments` chưa chạy |
+| Voucher nối checkout (validate → reserve → confirm/release) | ✅ Đã làm | Unit mock; int-spec (TC-153) + migration `AddVoucherRedemptions` chưa chạy |
+| Refund: huỷ → `CANCELLED` + hoàn tiền ở Payment; hoàn hàng → `REFUNDING→REFUNDED` | ✅ Đã làm | Unit mock; raw SQL `UPDATE refunds` và `manager.insert(Refund, {order:{id}})` chưa kiểm trên Postgres thật; int-spec TC-132 chưa chạy |
+| Scheduler hết hạn 15' + auto COMPLETED 7 ngày | ✅ Đã làm | Unit mock (có `jest.mock('@nestjs/schedule')`); chạy thật chưa |
+| Gateway: checkout trả `payment_url`, idempotency bắt buộc, simulator, huỷ/hoàn, catalog ghép tồn kho | ✅ Đã làm | 60 unit/supertest (mock Orders/Payment/Redis); chưa smoke qua stack thật |
+| Cutover: xoá Saga cũ, migration chốt, seed/loadtest/http/docs | ✅ Đã làm | `grep` code rỗng với `CREATE_ORDER|CHARGE_PAYMENT|ADJUST_STOCK` cũ; seed/k6/compose **chỉ sửa mã, chưa chạy** |
+| **E2E runbook E-01…E-14** (`plans/261015-1700-checkout-v2-event-driven/test-cases.md`) | ⏳ **Chưa chạy** | Cần Postgres + Kafka + 10 app; danh sách và thứ tự ở báo cáo phase 14 |
 
-Thứ tự đề xuất khi lập plan: (1) Kafka + outbox/inbox nền tảng → (2) Inventory → (3) Payment intent/webhook + state machine mới → (4) Shipping → (5) Voucher + Refund + scheduler → (6) dọn code Saga cũ.
+**Chuyển đổi: cutover một lần** — không feature flag, không chạy song song; đã xoá Saga cũ (`CreateOrderHandler`, `saga/`, `ConfirmOrderPaymentHandler`, `PaymentEventsController` TCP, `CHARGE_PAYMENT`, `ADJUST_STOCK` của Product, `POST /orders`, `PATCH /orders/:id/status`, `/refunds*`) kèm migration trạng thái đơn và chuyển stock sang Inventory.
+
+Thứ tự đã thực hiện: (1) Kafka + outbox/inbox nền tảng → (2) Notification consumer → (3) Inventory → (4) state machine + khoá lạc quan → (5) Payment intent/webhook/refund → (6) Orders checkout/consumer → (7) Shipping → (8) huỷ/hoàn/scheduler → (9) Voucher → (10) Gateway → (11) cutover.
+
+### 10.2 Điểm triển khai khác/cụ thể hơn thiết kế gốc
+
+- `payment_url` = `${PUBLIC_API_BASE_URL}/orders/{id}/pay` (cần JWT) → trả JSON `{paymentUrl, expiresAt}`, FE tự chuyển trang (không 302). `paymentUrl` thật = `/simulator/pay/:intentId`.
+- Trang `/simulator/*` ở **Gateway**, miễn `x-api-key`, 404 khi `NODE_ENV=production`; POST gọi `SIMULATE_PAYMENT` rồi `HANDLE_WEBHOOK` (HMAC không bị bỏ qua).
+- `cancelReason` mở rộng ngoài §3: `PAYMENT_EXPIRED`, `PAYMENT_FAILED`, `REPLACED`, `RESERVATION_INVALID` (đơn chưa thanh toán).
+- Reservation có thêm trạng thái `RESTOCKED` (để `RestockInventory` idempotent sau `COMMITTED`); `CommitInventory` thành công khi reservation còn `RESERVED` kể cả hơi quá `expiresAt`.
+- Thanh toán muộn vào đơn `CANCELLED`: hoàn **toàn bộ số đã thu** (§7.1 không nói luồng này; mặc định, chưa xác nhận).
+- Voucher release qua `OrderCancelled{paid:false}` trên `order-events` (không thêm topic); không giới hạn lượt theo user. `variantId` ở checkout trả 400 (cart chưa hỗ trợ biến thể).
+- Webhook giao hàng ký HMAC `SHIPPING_WEBHOOK_SECRET` (bắt buộc); `PAYMENT_WEBHOOK_SECRET` bắt buộc, không còn fallback.
+- Payment `RefundPayment` hết lượt retry → `onExhausted` phát `PaymentRefundFailed` (ngoài thiết kế gốc) để Orders không kẹt `refundStatus=PENDING`.
+- Idempotency Gateway: key scope `userId+method+path`, `processing` 120s, fail-closed 503 cho route bắt buộc.
+- Đơn cũ khi cutover: `PENDING`/`PROCESSING` → `PENDING_PAYMENT` + `expiresAt=now()` (huỷ ngay, **không hoàn tiền** — chấp nhận vì chỉ có dữ liệu seed).
 
 ### 10.1 Simulator (Payment & Shipping)
 
@@ -262,15 +279,16 @@ Không gọi dịch vụ ngoài. Provider mô phỏng chạy trong chính servic
 
 **Shipping**: carrier giả trả mã vận đơn ngẫu nhiên khi `CreateShipment`. "Đã giao" do timer hoặc endpoint admin kích hoạt → phát webhook `ShipmentDelivered` về Shipping.
 
-**Env (đề xuất, đều tuỳ chọn)**
+**Env (đã implement; mọi biến SIM tuỳ chọn)**
 
 | Biến | Ý nghĩa | Mặc định |
 |---|---|---|
 | `PAYMENT_SIM_MODE` | `manual` (bấm nút) / `auto-success` / `auto-fail` | `manual` |
 | `PAYMENT_SIM_DELAY_MS` | Độ trễ trước khi tự gọi webhook ở chế độ auto | `3000` |
 | `SHIPPING_SIM_DELIVER_DELAY_MS` | Độ trễ tự chuyển "đã giao"; `0` = chỉ kích hoạt tay | `0` |
+| `SHIPPING_SIM_MODE` | `success` / `fail` (thử retry 3 → DLQ → `ShipmentFailed`) | `success` |
 
-**Ràng buộc bảo mật**: webhook của simulator **vẫn phải verify HMAC**, không bỏ qua chữ ký. Hiện `PAYMENT_WEBHOOK_SECRET` có fallback `simulated-webhook-secret` (xem [payment/CLAUDE.md](../apps/payment/CLAUDE.md)); khi implement nên bắt buộc đặt secret qua env (đưa vào `validateEnv`) thay vì fallback. Route `/simulator/*` phải tắt khi `NODE_ENV=production`.
+**Ràng buộc bảo mật**: webhook của simulator **vẫn phải verify HMAC**, không bỏ qua chữ ký. `PAYMENT_WEBHOOK_SECRET` và `SHIPPING_WEBHOOK_SECRET` **đã** là biến bắt buộc trong `validateEnv` (không còn fallback; xem [payment/CLAUDE.md](../apps/payment/CLAUDE.md)). Route `/simulator/*` phải tắt khi `NODE_ENV=production`.
 
 ## 11. Câu hỏi mở (cần chốt trước khi code)
 

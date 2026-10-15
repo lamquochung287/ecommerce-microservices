@@ -1,13 +1,13 @@
 # Project Roadmap
 
-**Ngày cập nhật**: 2026-10-05
-**Trạng thái**: Early-stage, Phase 0-2 đã hoàn thành, Phase 3 đang lên kế hoạch
+**Ngày cập nhật**: 2026-10-15
+**Trạng thái**: Early-stage, Phase 0-2 đã hoàn thành, **Checkout v2 (event-driven) đã cutover — code + unit test + build xong, chưa kiểm chứng trên stack thật**, Phase 3 đang lên kế hoạch
 
 ---
 
 ## Trạng thái hiện tại
 
-Hệ thống ecommerce microservices đang ở giai đoạn **early-stage development**, hạ tầng lõi và các domain nghiệp vụ chính đã được implement qua 3 phase. Tất cả service đã giao tiếp qua TCP, database migration chạy được, và đã có setup observability ban đầu. Hệ thống hiện mang tính **học tập** (chạy trên localhost) hơn là production-ready.
+Hệ thống ecommerce microservices đang ở giai đoạn **early-stage development**, hạ tầng lõi và các domain nghiệp vụ chính đã được implement qua 3 phase. RPC đồng bộ giữa service qua TCP, event/command bất đồng bộ qua Kafka (Outbox/Inbox) sau cutover checkout v2; database migration và setup observability ban đầu đã có. Hệ thống hiện mang tính **học tập** (chạy trên localhost) hơn là production-ready.
 
 ### Trạng thái implementation theo Phase
 
@@ -16,6 +16,7 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 | **Phase 0: Foundations** | ✅ XONG | Health check, graceful shutdown, DB migrations, idempotency, outbox pattern |
 | **Phase 1: Core Domain** | ✅ XONG | User auth (JWT+bcrypt), Product catalog (CQRS), Cart, Saga checkout, Inventory management, RBAC (bitmask), Address book |
 | **Phase 2: Ecosystem** | ✅ XONG | Payment (simulate), Notification (email scaffold), Review kèm purchase verification, Promotion (voucher có locking), Media (MinIO) |
+| **Checkout v2 (event-driven)** | ✅ Code xong (2026-10-15), ⚠️ chưa kiểm chứng trên stack thật | Kafka + Outbox/Inbox, Inventory (reserve/commit/release), Payment intent + webhook + refund, Shipping, Voucher nối checkout, huỷ/hoàn hàng, scheduler, Gateway checkout chọn món + idempotency bắt buộc + simulator; Saga cũ đã xoá. Xem [target-checkout-architecture.md §10](./target-checkout-architecture.md) |
 | **Phase 3: Production Hardening** | 🔄 TODO | Hoàn thiện observability, API docs, security audit, real payment/email provider, search indexing |
 
 ---
@@ -67,20 +68,12 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 
 #### Orders Service (phức tạp nhất)
 - ✅ Quản lý cart (lưu Redis, TTL 30 ngày)
-- ✅ Checkout Saga pattern (nhiều bước, có compensation):
-  1. Reserve inventory (qua TCP tới Product)
-  2. Tạo Order+Items (DB transaction)
-  3. Charge payment (qua TCP tới Payment, có idempotency key)
-  4. Confirm order (cập nhật status, transactional outbox)
-- ✅ State machine cho Order (PENDING → PROCESSING → PAID → SHIPPED → DELIVERED, +CANCELLED/REFUNDED)
-- ✅ Refund workflow (PENDING → APPROVED/REJECTED → COMPLETED)
-- ✅ Transactional Outbox (đảm bảo event không mất)
-- ✅ OutboxWorker (@Cron EVERY_SECOND, batch 20, retry tối đa 5 lần)
+- ✅ ~~Checkout Saga đồng bộ~~ → **đã thay bằng checkout v2** (xem mục "Checkout v2" bên dưới): reserve kho TTL → Order `PENDING_PAYMENT` → payment intent → thanh toán/webhook → commit kho → vận chuyển, điều phối bằng Outbox → Kafka
+- ✅ State machine cho Order (nay: PENDING_PAYMENT → PAID → FULFILLING → SHIPPED → DELIVERED → COMPLETED, +CANCELLED, +REFUNDING → REFUNDED; khoá lạc quan `version`)
+- ✅ Hoàn tiền thật qua Payment (huỷ khi chưa ship, hoàn hàng trong 7 ngày); workflow refund PENDING/APPROVED/REJECTED cũ đã xoá
+- ✅ Transactional Outbox → Kafka at-least-once (thay `OutboxWorker` TCP at-most-once)
 - ✅ Implement đầy đủ CQRS
-- **Gap đã biết**:
-  - `unitPrice` lấy từ DTO của client, Orders service (`CreateOrderHandler`) không tự re-validate lại với giá gốc từ Product (price-trust gap ở tầng Orders). Gateway's `/cart/checkout` (flow khách hàng dùng) có che chắn bằng cách set `unitPrice` server-side từ Product trước khi gọi Orders, nhưng endpoint `/orders` tạo trực tiếp vẫn forward giá client gửi không kiểm tra
-  - Refund→Payment compensation (cơ chế hoàn tiền thật) chưa implement
-  - Full refund trên order đang PAID/SHIPPED sẽ không tự động chuyển sang REFUNDED (edge case của state machine)
+- ✅ Các gap cũ đã đóng: tin `unitPrice`/`userId` từ client (route `POST /orders` đã xoá, giá/số lượng server-side), refund không hoàn tiền thật, Saga không có state bền
 
 **Tham khảo**: `plans/260925-1612-production-readiness-roadmap/phase-01-core-domain-features.md`
 
@@ -97,11 +90,11 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 - ✅ Theo dõi payment transaction (`idempotencyKey` unique, chống charge trùng)
 - ✅ Verify chữ ký webhook bằng HMAC-SHA256
 - ✅ Dedup webhook (`PaymentWebhookLog.eventId`)
-- ✅ Emit event `payment_succeeded`/`payment_failed` tới Orders
+- ✅ (Sau checkout v2) payment intent + webhook → outbox `PaymentSucceeded/Failed` qua Kafka; `CHARGE_PAYMENT` và emit TCP trực tiếp đã xoá
 - **Roadmap**: Provider thật (vnpay, momo) — đã có scaffold, chọn qua env
 
 #### Notification Service
-- ✅ Event listener (`order.created`, `order.status_updated`)
+- ✅ Event listener (nay: Kafka `order-events` — `OrderCreated`, `OrderStatusChanged`, có Inbox)
 - ✅ Flow gửi email (lấy email user, gửi qua `EmailProvider`)
 - ✅ `SimulatedEmailProvider` (mặc định, chỉ log)
 - **Roadmap**: Provider thật (Resend, Brevo), push notification (Firebase FCM)
@@ -116,7 +109,7 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 #### Promotion Service
 - ✅ Quản lý voucher (code, loại/giá trị discount, ngày hết hạn, giới hạn số lần dùng)
 - ✅ ApplyVoucher dùng pessimistic locking (tránh dùng vượt giới hạn khi có concurrent request)
-- ✅ CQRS đầy đủ, tự chứa (không gọi service nào khác ngoài DB)
+- ✅ CQRS đầy đủ; (sau checkout v2) validate/reserve/release/confirm nối checkout + consumer `order-events`
 
 #### Media (MinIO)
 - ✅ File storage tương thích S3 (tự tạo bucket)
@@ -125,6 +118,24 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 - ✅ Sinh presigned URL (link tải tạm thời)
 
 **Tham khảo**: `plans/260925-1612-production-readiness-roadmap/phase-02-ecosystem-expansion.md`
+
+---
+
+### Checkout v2 — Event-driven (cutover 2026-10-15) ✅ code / ⚠️ chưa kiểm chứng thật
+
+**Mục tiêu**: thay Saga đồng bộ bằng orchestration event-driven (thiết kế: [target-checkout-architecture.md](./target-checkout-architecture.md); plan + báo cáo từng phase: `plans/261015-1700-checkout-v2-event-driven/`).
+
+**Đã hoàn thành (code + unit test mock + `nest build` 10 app)**:
+- ✅ Nền tảng messaging `libs/messaging` (Kafka, outbox relay at-least-once, inbox, consumer runner retry 3 → DLQ)
+- ✅ `apps/inventory` (:3008): reserve/commit/release/restock, `replaces`, job hết hạn
+- ✅ `apps/shipping` (:3009): carrier mô phỏng, retry 3 → DLQ → `ShipmentFailed`, webhook giao hàng HMAC
+- ✅ Payment intent + webhook → outbox + refund + simulator; Gateway `/simulator/*`
+- ✅ Orders: state machine mới + khoá lạc quan, checkout đồng bộ (chốt #1/#2/#3), consumer payment/inventory/shipping, huỷ/hoàn hàng, scheduler 30s/10 phút
+- ✅ Voucher nối checkout (validate → reserve → confirm/release)
+- ✅ Gateway: checkout chọn món, idempotency bắt buộc (fail-closed), `GET /orders/:id/pay`, huỷ/hoàn, simulator, catalog ghép tồn kho
+- ✅ Cutover: xoá Saga cũ (`CreateOrderHandler`, `saga/`, `CHARGE_PAYMENT`, `ADJUST_STOCK` của Product, `POST /orders`, `PATCH /orders/:id/status`, `/refunds*`), migration chốt, cập nhật seed/loadtest/http/docs
+
+**Việc còn lại (cần được phép chạy DB/Kafka)**: tạo DB sạch → `loadtest/migrate.js` → seed → `npm run test:int` → khởi động 10 app → chạy e2e E-01…E-14 (`plans/261015-1700-checkout-v2-event-driven/test-cases.md`) → k6. Xem runbook trong `plans/261015-1700-checkout-v2-event-driven/reports/phase-14-report.md`.
 
 ---
 
@@ -185,13 +196,15 @@ Chi tiết bằng chứng/đề xuất: [design-trade-offs.md §5](./design-trad
 
 | Gap | Ảnh hưởng | Ưu tiên | Ghi chú |
 |-----|--------|----------|-------|
-| Tin `unitPrice` + `userId` từ client ở `POST /orders` | Customer đặt đơn giá tuỳ ý / mạo danh user | CAO | Chỉ `/cart/checkout` lấy giá server-side (R1) |
-| Thiếu kiểm tra chủ sở hữu (orders, refunds, addresses) | Đọc/sửa dữ liệu của user khác; `GET /orders` không `userId` trả mọi đơn | CAO | Mới có phân quyền theo module/action (R2, R3) |
-| Saga không có state bền | Kho bị trừ khi crash giữa các bước; payment charge xong nhưng timeout → huỷ đơn | CAO | Cần job reconcile đơn `PENDING` + đối soát payment |
-| Webhook thanh toán chưa cập nhật Order | Orders đã nghe `payment_succeeded` từ charge đồng bộ, nhưng webhook của provider async (VNPay/MoMo) chưa nối tới Order | TRUNG BÌNH | Nối webhook → cập nhật Order khi dùng provider thật |
-| Outbox at-most-once | Event có thể mất khi consumer down; phát trùng khi nhiều instance | TRUNG BÌNH | Không ack, không `SKIP LOCKED`, Notification không khử trùng |
-| Cancel/Refund không có side-effect | Không hoàn kho/tiền; refund không tự `REFUNDED` khi order PAID/SHIPPED | TRUNG BÌNH | Chỉ cập nhật sổ sách (R5, R6) |
-| Voucher chưa nối checkout | Trừ lượt ngay khi apply, không hoàn; không giới hạn theo user | TRUNG BÌNH | R7 |
+| ~~Tin `unitPrice` + `userId` từ client ở `POST /orders`~~ | **Đã đóng** (route xoá; giá/số lượng server-side) | — | R1 |
+| Thiếu kiểm tra chủ sở hữu (`GET /orders*`, `GET /orders/:id/refunds`, addresses) | Đọc/sửa dữ liệu của user khác; `GET /orders` không `userId` trả mọi đơn | CAO | Mới có phân quyền theo module/action (R2, R3); `/orders/:id/pay\|cancel\|return` đã kiểm tra |
+| ~~Saga không có state bền~~ / ~~Webhook chưa cập nhật Order~~ / ~~Outbox at-most-once~~ | **Đã đóng** bằng orchestration + outbox/inbox Kafka; cần kiểm chứng trên stack thật | — | §2.1, §2.4 trade-offs |
+| Checkout v2 chưa kiểm chứng trên Postgres/Kafka thật | Migration, SQL raw (replaces, refunds), unnest/NULLS NOT DISTINCT, relay→consumer chưa chạy | CAO | Chạy runbook cutover |
+| Crash giữa `RESERVE_VOUCHER` và TX tạo đơn; `replaces` mất reservation khi TX lỗi | Kẹt lượt voucher / link thanh toán chết | TRUNG BÌNH | R16 |
+| Hoàn tiền `FAILED` không retry; hoàn hàng gặp `PaymentRefundFailed` kẹt `REFUNDING` | Cần admin xử lý tay | TRUNG BÌNH | R18 |
+| Idempotency Gateway get-then-set không nguyên tử | Hai request đồng thời cùng key có thể cùng lọt | TRUNG BÌNH | R8; thêm `SET NX` vào `libs/cached` |
+| DLQ/outbox `FAILED` chưa có alert/replay | Event thất bại chỉ có metric | TRUNG BÌNH | R11 |
+| `/vouchers/apply` cũ | Tiêu lượt không gắn đơn | THẤP | R7 |
 | Register không gán role mặc định | User mới không gọi được API cần quyền | TRUNG BÌNH | R13 |
 | Chưa cache Product / search ILIKE không index | Hiệu năng với 50.000 sản phẩm seed | TRUNG BÌNH | Có sẵn libs/cached |
 | Push notification | Tính năng chưa xong | THẤP | PushProvider đã wiring nhưng chưa handler nào gọi |
@@ -201,8 +214,8 @@ Chi tiết bằng chứng/đề xuất: [design-trade-offs.md §5](./design-trad
 | Gap | Ảnh hưởng | Ưu tiên | Ghi chú |
 |-----|--------|----------|-------|
 | Thiếu .env.example | Khó onboard dev mới | THẤP | Chưa có tài liệu env cho dev mới |
-| Event handler còn stub | Observability/search | THẤP | `ProductCreatedEvent`, `OrderCreatedEvent` chỉ console.log (tương lai Kafka→Elasticsearch) |
-| Payment provider thật | Tính năng chưa xong | THẤP | `SimulatedPaymentProvider` hoạt động tốt, vnpay/momo thật chưa test |
+| Event handler còn stub | Observability/search | THẤP | `ProductCreatedEvent` chỉ console.log (tương lai Kafka→Elasticsearch) |
+| Payment/Shipping provider thật | Tính năng chưa xong | THẤP | Chỉ simulator (đã chốt); thay cổng thật = thêm provider, ký raw body |
 | Email provider thật | Tính năng chưa xong | THẤP | `SimulatedEmailProvider` hoạt động tốt, Resend/Brevo thật chưa test |
 | Refresh token | UX | THẤP | **Xác nhận không có endpoint refresh** — access token 15 phút hết hạn phải login lại |
 | Kiến trúc User service | Tính nhất quán | THẤP | Không dùng CQRS (khác các service kia); có thể là chủ ý vì đơn giản |
@@ -212,7 +225,9 @@ Chi tiết bằng chứng/đề xuất: [design-trade-offs.md §5](./design-trad
 | Mục | Vị trí | Hành động |
 |------|----------|--------|
 | Hằng số CMD cũ | libs/common/src/constant/cmd.ts | Xoá (đã được thay bằng libs/constant/message-pattern.constant.ts) |
-| Dependency RabbitMQ | package.json | Xoá amqp-connection-manager, amqplib (đã deprecated hoàn toàn, dùng TCP thay thế) |
+| Dependency RabbitMQ | package.json | Xoá amqp-connection-manager, amqplib (đã deprecated hoàn toàn; kênh bất đồng bộ nay là Kafka) |
+| `gateway.controller.spec.ts` | apps/gateway/src | Boilerplate đang fail (thiếu provider `USER_SERVICE`): sửa hoặc xoá |
+| Cột `refunds.status` APPROVED/REJECTED | apps/orders entity | Không còn code ghi; cân nhắc gỡ khỏi enum |
 
 ---
 
@@ -253,26 +268,28 @@ Không có vấn đề backward compatibility; các phase sau đều dựa trên
 
 | Quyết định | Lý do | Trạng thái |
 |----------|-----------|--------|
-| **Không dùng RabbitMQ** | TCP point-to-point đủ dùng cho mục đích học tập; giảm độ phức tạp | ✅ Đã implement |
-| **Transactional Outbox** | Ghi event cùng transaction với đổi trạng thái order (giao event hiện at-most-once, xem trade-offs §2.4) | ✅ Đã implement |
+| ~~Không dùng RabbitMQ / không broker~~ | TCP point-to-point đủ dùng lúc đầu | ⛔ **Đã đảo 2026-10-15**: thêm Kafka cho event/command (RabbitMQ vẫn không dùng) |
+| **Transactional Outbox** | Ghi event cùng transaction với đổi trạng thái order; nay relay Kafka at-least-once + Inbox (xem trade-offs §2.4) | ✅ Đã implement (kiểm chứng thật: chưa) |
 | **Simulate trước, thật sau** | Học pattern mà không vướng tài khoản bên thứ 3; provider qua DI token (hiện bind cứng Simulated, chưa chọn theo env) | ✅ Đã implement (phần chọn theo env: TODO) |
 | **RBAC dạng bitmask** | Check permission hiệu quả bằng phép toán bit | ✅ Đã implement |
-| **Optimistic locking (Product)** | Đọc nhiều, ghi ít; retry logic chấp nhận được | ✅ Đã implement |
+| **Optimistic locking** | Nay áp dụng ở **Order** (`UPDATE ... WHERE version`); Product không còn trừ kho | ✅ Đã implement |
 | **Pessimistic locking (Promotion)** | Quan trọng: tránh voucher dùng vượt giới hạn; thời gian lock ngắn nên chấp nhận được | ✅ Đã implement |
 | **Không dùng SMS OTP** | Email OTP đã đủ; SMS tốn thêm chi phí/độ phức tạp | ✅ Đã quyết định, dùng Email |
 
-### Quyết định đã chốt 2026-10-15 (thiết kế đích, chưa implement)
+### Quyết định đã chốt 2026-10-15 (checkout v2 — đã implement, chưa kiểm chứng thật)
 
 Chi tiết: [target-checkout-architecture.md](./target-checkout-architecture.md).
 
 | Quyết định | Lý do | Trạng thái |
 |----------|-----------|--------|
-| **Thêm Kafka cho event/command bất đồng bộ** (đảo quyết định "không dùng RabbitMQ" ở trên; RPC đồng bộ vẫn TCP) | Outbox TCP hiện at-most-once, mất event là kẹt đơn; luồng orchestrated cần at-least-once + inbox | 🎯 Chốt, chưa implement |
-| **Tách `apps/inventory` (:3008)** với reserve/commit/release + TTL 15' | Hết trừ kho thật lúc checkout; tự dọn đơn bỏ dở | 🎯 Chốt, chưa implement |
-| **Thêm `apps/shipping` (:3009)**, carrier mô phỏng | Có vòng đời SHIPPED/DELIVERED thật | 🎯 Chốt, chưa implement |
-| **State machine mới** PENDING_PAYMENT→PAID→FULFILLING→SHIPPED→DELIVERED→COMPLETED (+REFUNDING→REFUNDED) | Khớp luồng orchestrated | 🎯 Chốt, chưa implement |
-| **Chỉ Simulated cho Payment/Shipping** (không tích hợp ngoài), nhưng đi qua intent + webhook HMAC thật; hoãn vnpay/momo | Học pattern không vướng tài khoản bên thứ 3; thay cổng thật sau chỉ cần thêm provider | 🎯 Chốt, chưa implement |
-| **Payment async** (`createIntent` + webhook), nối Voucher, job hết hạn/auto COMPLETED | Loại bỏ cửa sổ lỗi charge-timeout/đơn kẹt PENDING | 🎯 Chốt, chưa implement |
+| **Thêm Kafka cho event/command bất đồng bộ** (đảo quyết định "không dùng RabbitMQ"; RPC đồng bộ vẫn TCP) | Outbox TCP at-most-once, mất event là kẹt đơn; orchestration cần at-least-once + inbox | ✅ Đã implement (`libs/messaging`) |
+| **Tách `apps/inventory` (:3008)** với reserve/commit/release + TTL 15' | Hết trừ kho thật lúc checkout; tự dọn đơn bỏ dở | ✅ Đã implement |
+| **Thêm `apps/shipping` (:3009)**, carrier mô phỏng | Có vòng đời SHIPPED/DELIVERED thật | ✅ Đã implement |
+| **State machine mới** PENDING_PAYMENT→PAID→FULFILLING→SHIPPED→DELIVERED→COMPLETED (+REFUNDING→REFUNDED) | Khớp luồng orchestrated | ✅ Đã implement + migration chốt |
+| **Chỉ Simulated cho Payment/Shipping** (không tích hợp ngoài), nhưng đi qua intent + webhook HMAC thật; hoãn vnpay/momo | Học pattern không vướng tài khoản bên thứ 3 | ✅ Đã implement |
+| **Payment async** (`createIntent` + webhook), nối Voucher, job hết hạn/auto COMPLETED | Loại bỏ cửa sổ lỗi charge-timeout/đơn kẹt PENDING | ✅ Đã implement |
+| **Cutover một lần, không feature flag**; xoá Saga cũ; `PENDING/PROCESSING` → `PENDING_PAYMENT` (huỷ ngay, chấp nhận vì chỉ có dữ liệu seed) | Giảm độ phức tạp song song hai luồng | ✅ Đã thực hiện ở mức code; migration chưa chạy |
+| **Giữ `/vouchers/apply`; xoá `POST /orders`, `PATCH /orders/:id/status`, `/refunds*`** | Route cũ tin dữ liệu client / đổi trạng thái tay | ✅ Đã thực hiện |
 
 ### Quyết định cần chốt (Phase 3 sắp tới)
 
@@ -296,14 +313,14 @@ Các câu hỏi thiết kế còn mở (nguồn giá, hoàn kho khi huỷ, vouch
 - ✅ Mọi service có health check + graceful shutdown
 - ✅ Saga pattern đã verify bằng test (compensate khi fail)
 - ✅ Test coverage ≥70% cho critical path (Saga, Outbox, Stock adjust)
-- ✅ Flow checkout end-to-end đầy đủ: đăng ký → xem sản phẩm → thêm giỏ hàng → checkout → thanh toán → notification
-- ✅ Không phụ thuộc RabbitMQ (chỉ dùng TCP)
-- ✅ Mọi service giao tiếp qua TCP (không truy cập DB chéo service trực tiếp)
+- ✅ Flow checkout end-to-end (luồng Saga cũ; nay thay bằng checkout v2 — e2e chưa chạy lại)
+- ✅ Không phụ thuộc RabbitMQ (nay dùng Kafka cho event)
+- ✅ Service giao tiếp qua TCP (RPC) và Kafka (event/command); không truy cập bảng của service khác
 
 ### Tiêu chí thành công Phase 3 (Mục tiêu)
 
 - [ ] Jaeger trace capture 100% các cuộc gọi giữa service
-- [ ] Prometheus scrape thành công endpoint /metrics của cả 8 service
+- [ ] Prometheus scrape thành công endpoint /metrics của cả 10 service (thêm target inventory 9472, shipping 9473)
 - [ ] Grafana dashboard hiển thị health, latency, error rate của service
 - [ ] Mọi API endpoint đã document trong Swagger
 - [ ] Payment provider thật (vnpay) đã test end-to-end
@@ -341,7 +358,7 @@ Các câu hỏi thiết kế còn mở (nguồn giá, hoàn kho khi huỷ, vouch
 
 1. **Tạo plan chi tiết cho Phase 3** (checklist các task cụ thể)
 2. **Chọn khu vực ưu tiên**: wiring observability hay tích hợp provider thật trước?
-3. **Fix gap nghiêm trọng** (validate unitPrice, cache product) trước khi hardening
+3. **Chạy runbook kiểm chứng checkout v2 trên stack thật** (migration, int-spec, e2e), rồi fix gap nghiêm trọng (ownership check, cache product) trước khi hardening
 4. **Setup CI/CD** (GitHub Actions với bước lint, test, build)
 5. **Thực hiện security audit** (review code cho auth, xử lý dữ liệu, secret)
 6. **Load testing** (verify hệ thống scale được tới mức concurrency mục tiêu)
@@ -353,7 +370,7 @@ Các câu hỏi thiết kế còn mở (nguồn giá, hoàn kho khi huỷ, vouch
 - [ ] Admin back-office nên làm trong Phase 3 hay để sau khi launch?
 - [ ] Ưu tiên payment provider thật nào trước (vnpay hay momo)?
 - [ ] Cache product nên làm trước Phase 3 (ngay bây giờ) hay để làm optimization trong Phase 3?
-- [ ] Vấn đề unitPrice do client cung cấp có thực sự đáng lo cho mục đích học tập (so với production) không?
+- [x] ~~Vấn đề unitPrice do client cung cấp~~ — đã đóng (giá server-side)
 - [ ] Có nên xem lại SMS OTP, hay email OTP là đủ về lâu dài?
 - [ ] Deployment target đã chốt local, hay vẫn để ngỏ khả năng dùng K8s sau này?
 

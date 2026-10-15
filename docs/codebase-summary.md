@@ -1,34 +1,40 @@
 # Codebase Summary - Monorepo Structure & Component Overview
 
-**Ngày cập nhật**: 2026-09-28
+**Ngày cập nhật**: 2026-10-15 (sau cutover checkout v2)
+
+> **Trạng thái kiểm chứng**: code, unit test (mock) và `nest build` của cả 10 app đã xong; migration, int-spec (Postgres), seed, load test và e2e qua Kafka **chưa chạy trên stack thật** trong lần cutover này. Số liệu LOC cũ đã bỏ (không còn đo lại).
 
 ## Tổng Quan Monorepo
 
-Dự án sử dụng **NestJS Monorepo** pattern với 8 applications (apps/) và 4 shared libraries (libs/). Tất cả source code được quản lý qua một `package.json` gốc và `nest-cli.json` để orchestrate các app/lib riêng lẻ.
+Dự án dùng **NestJS Monorepo** với 10 applications (`apps/`) và 6 shared libraries (`libs/`), quản lý qua một `package.json` gốc và `nest-cli.json`.
 
 ```
 ecommerce-system/
-├── apps/                 # 8 ứng dụng chạy độc lập (có main.ts)
-│   ├── gateway/         # HTTP entry point
-│   ├── user/            # Authentication & User Management
-│   ├── product/         # Product Catalog & Inventory
-│   ├── orders/          # Shopping Cart & Orders
-│   ├── payment/         # Payment Processing
-│   ├── notification/    # Event-driven Notifications
-│   ├── review/          # Reviews & Ratings
-│   └── promotion/       # Vouchers & Promotions
+├── apps/                 # 10 ứng dụng chạy độc lập (có main.ts)
+│   ├── gateway/         # HTTP :3000 — entry point, auth, idempotency, simulator
+│   ├── user/            # TCP :3001 — Authentication, RBAC, Address
+│   ├── orders/          # TCP :3002 + Kafka — Cart, state machine, checkout v2, scheduler
+│   ├── product/         # TCP :3003 — Catalog (không còn tồn kho)
+│   ├── payment/         # TCP :3004 + Kafka — payment intent, webhook, refund
+│   ├── notification/    # TCP :3005 + Kafka — email theo order-events
+│   ├── review/          # TCP :3006 — Reviews
+│   ├── promotion/       # TCP :3007 + Kafka — Voucher
+│   ├── inventory/       # TCP :3008 + Kafka — stock_items, reservations
+│   └── shipping/        # TCP :3009 + Kafka — vận đơn, carrier mô phỏng
 ├── libs/                # Shared libraries (không có main.ts)
-│   ├── common/          # Base filters, common config, tracing
+│   ├── common/          # Base filters, env validation, tracing
 │   ├── database/        # TypeORM config & migrations
 │   ├── cached/          # Redis client & cache service
 │   ├── media/           # MinIO S3-compatible storage
-│   └── constant/        # Shared constants (ports, message patterns)
-├── docker-compose.yml   # Infrastructure: Postgres, Redis, Jaeger, Prometheus, Grafana, MinIO
-├── package.json
-├── nest-cli.json
-├── tsconfig.json
-├── .env                 # Environment variables (gitignored)
-└── ...
+│   ├── messaging/       # Kafka: outbox/inbox, consumer runner, producer, topics
+│   └── constant/        # Ports, message patterns, Kafka topics/types, permissions
+├── docker-compose.yml   # Postgres, Redis, Kafka (KRaft), Jaeger, Prometheus, Grafana, MinIO
+├── scripts/seed.ts      # Seed dữ liệu lớn (products + stock_items, orders theo state machine mới)
+├── loadtest/            # k6 + docker compose load test (10 app)
+├── http/api-tests.http  # Request mẫu (checkout v2, simulator, huỷ/hoàn, giao hàng)
+├── plans/               # Plan + báo cáo từng phase của checkout v2
+├── package.json · nest-cli.json · tsconfig.json
+└── .env                 # Biến môi trường (gitignored; không có .env.example)
 ```
 
 ---
@@ -36,308 +42,129 @@ ecommerce-system/
 ## Applications (Apps)
 
 ### 1. Gateway (`apps/gateway/`)
-**Mục đích**: HTTP API entry point, routing, authentication, rate limiting  
-**Kiến trúc**: No CQRS (direct service routing)  
-**Kích thước**: ~51 files, ~2,240 LOC
+**Mục đích**: HTTP API entry point, routing, authentication, rate limiting, idempotency, simulator trang thanh toán.
+**Kiến trúc**: No CQRS (direct service routing).
 
-- **Controllers** (16 files): REST endpoints cho tất cả domains (user, product, orders, payment, review, promotion, health)
-- **Shared Clients Module**: Đăng ký TCP ClientProxy cho tất cả 7 microservices (USER, ORDER, PRODUCT, PAYMENT, NOTIFICATION, REVIEW, PROMOTION)
-- **Interceptors**:
-  - `IdempotencyInterceptor`: Redis-backed idempotency (x-idempotency-key header, 24h TTL)
-  - `TransformInterceptor`: Wrap response thành `{success, data, error, message, meta}` envelope
-- **Guards**:
-  - `JwtAuthGuard`: Verify JWT + TCP call tới USER service (5s timeout)
-  - `PermissionGuard`: Bitmask permission check (@RequirePermission decorator)
-  - `ThrottlerGuard`: Redis-backed rate limiting (100/min default, 5/min cho login/register)
-- **Middleware**: RequestTrackerMiddleware (x-request-id, x-api-key enforcement, request log)
-- **Error Handling**: `HttpExceptionFilter` (map RPC errors → HTTP status)
-- **Observability**: Swagger docs tại /api/docs, OpenTelemetry tracing
+- **Controllers**: REST cho user, product (ghép tồn kho từ Inventory), orders (`GET /orders*`), customer orders (`GET /orders/:id/pay`, `POST /orders/:id/cancel`, `POST /orders/:id/return`), cart (`POST /cart/checkout`), payment (`/webhooks/payments`, `/payments/:orderId/transaction`, `/simulator/pay/:intentId`), shipping (`/webhooks/shipping`, `/shipments/:orderId[/deliver]`), review, promotion, health.
+- **Shared Clients Module**: `ClientProxy` TCP cho USER, ORDER, PRODUCT, PAYMENT, NOTIFICATION, REVIEW, PROMOTION, INVENTORY, SHIPPING.
+- **Interceptors**: `IdempotencyInterceptor` (Redis; checkout bắt buộc header, fail-closed 503; key scope user+path), `TransformInterceptor` (envelope `{success, data, error, message, meta}`).
+- **Guards**: `JwtAuthGuard` (TCP `VERIFY_TOKEN`, 5s), `PermissionGuard` (bitmask), `ThrottlerGuard` (Redis; 100/min, login/register 5/min).
+- **Middleware**: `RequestTrackerMiddleware` (`x-request-id`, `x-api-key` bắt buộc; miễn `/health`, `/simulator/*`).
+- **Đã xoá ở cutover**: `POST /orders`, `PATCH /orders/:id/status`, `refund.controller.ts` (`/refunds*`).
 
 ### 2. User Service (`apps/user/`)
-**Mục đích**: Authentication, user profile, role management  
-**Kiến trúc**: Plain services (NO CQRS intentionally)  
-**Kích thước**: ~25 files, ~1,098 LOC
+**Mục đích**: Authentication, user profile, role management. **Kiến trúc**: plain services (cố ý không CQRS).
 
-- **Entities** (TypeORM):
-  - `User`: email unique, bcrypt password, permissions (bitmask legacy), soft-delete
-  - `Role`: permissions (bitmask), name unique
-  - `UserRole`: join table
-  - `Address`: user address book (country, state, city, street, zip), soft-delete
-- **Services**:
-  - `AuthService`: register (bcrypt hash), login (JWT generate + Redis refresh token), logout, verifyToken
-  - `RoleService`: CRUD roles, assign/remove, bitwise-OR permissions resolution
-  - `UserService`: get/update profile, avatar URL management
-  - `AddressService`: CRUD address, set default (transactional)
-- **TCP Patterns**: REGISTER_USER, LOGIN_USER, LOGOUT_USER, VERIFY_TOKEN, GET_USER_INFO, UPDATE_AVATAR, ADDRESS_*, ROLE_*
-- **Note**: No CQRS (architectural inconsistency vs. product/orders, but intentional: simple CRUD service)
+- **Entities**: `User` (email unique, bcrypt, permissions legacy, soft-delete), `Role` (bitmask), `UserRole`, `Address`.
+- **Services**: `AuthService`, `RoleService`, `UserService`, `AddressService`.
+- **TCP Patterns**: REGISTER_USER, LOGIN_USER, LOGOUT_USER, VERIFY_TOKEN, GET_USER_INFO, UPDATE_AVATAR, ADDRESS_*, ROLE_*.
 
 ### 3. Product Service (`apps/product/`)
-**Mục đích**: Product catalog, inventory, variants, attributes  
-**Kiến trúc**: Full CQRS (commands, queries, events, handlers)  
-**Kích thước**: ~56 files, ~1,524 LOC
+**Mục đích**: **chỉ catalog** — Product, Category, Brand, Attribute/AttributeValue, Variant. **Kiến trúc**: Full CQRS.
 
-- **Entities** (TypeORM):
-  - `Product`: name, slug (unique), description, price, stock, images (JSONB), @VersionColumn (optimistic lock), soft-delete, FK to Category/Brand
-  - `ProductVariant`: sku (unique), price, stock, @VersionColumn, M:N to AttributeValue, soft-delete
-  - `Attribute` / `AttributeValue`: 1:N structure for product attributes (color, size, etc.)
-  - `Brand`, `Category`: 1:N to Product
-- **CQRS Structure**:
-  - **Commands**: CreateProduct, UpdateProduct, DeleteProduct, CreateVariant, AdjustStock (most critical)
-  - **Queries**: GetProducts (paginated/filterable), GetProduct, GetBrands, GetAttributes, GetVariants
-  - **Events**: ProductCreatedEvent (stub: console.log, future Kafka→Elasticsearch)
-  - **Handlers**: AdjustStockHandler (optimistic lock retry logic, spec test), etc.
-- **Stock Management**:
-  - Optimistic locking (@VersionColumn) to prevent race conditions
-  - Chỉ có 1 message pattern duy nhất: `ADJUST_STOCK` (nhận `delta`, có thể âm/dương). Orders "reserve" bằng cách gọi `ADJUST_STOCK` với `delta` âm, và "release" (compensation) bằng cách gọi lại chính pattern đó với `delta` dương — **không có RPC riêng cho reserve/release**
-  - Low stock threshold tracking
-- **TCP Patterns**: PRODUCT_*, VARIANT_*, BRAND_*, ATTRIBUTE_*, ADJUST_STOCK
-- **Gap**: No Redis caching (catalog reads hit Postgres every time) — roadmap item
+- **Entities**: `Product` (slug unique, price, lowStockThreshold, images JSONB, `@VersionColumn`, soft-delete), `ProductVariant` (sku unique, price?, `@VersionColumn`), `Attribute`/`AttributeValue`, `Brand`, `Category`. **Không còn cột `stock`** (tồn kho ở Inventory).
+- **CQRS**: Commands CreateProduct/UpdateProduct/DeleteProduct/CreateVariant/UpdateVariant/DeleteVariant/Brand/Attribute…; Queries GetProducts (sort `name|price|createdAt`), GetProduct, GetBrands, GetAttributes, GetVariants; Event ProductCreatedEvent (stub `console.log`). `AdjustStock` **đã xoá** (chuyển sang `INVENTORY.ADJUST_STOCK`).
+- **Gap**: chưa cache Redis cho catalog.
 
 ### 4. Orders Service (`apps/orders/`)
-**Mục đích**: Shopping cart, order creation (Saga), refunds, outbox pattern  
-**Kiến trúc**: Full CQRS + Outbox pattern + State machine  
-**Kích thước**: ~48 files, ~1,387 LOC (largest & most complex)
+**Mục đích**: Cart, checkout v2 (orchestrator), state machine + khoá lạc quan, huỷ/hoàn hàng, scheduler. **Kiến trúc**: Full CQRS + Outbox/Inbox (Kafka). App hybrid TCP :3002 + Kafka group `orders-service`.
 
-- **Entities** (TypeORM):
-  - `Order`: uuid, userId, status (enum), subtotal/taxAmount/shippingFee/totalAmount (decimal riêng biệt, không gộp 1 field), địa chỉ giao hàng snapshot dưới dạng các column phẳng (recipientName, recipientPhone, addressLine1/2, city, province, postalCode, country — không phải nested object), soft-delete (`@DeleteDateColumn`). **Không có `@VersionColumn`** trên Order (chỉ Product/ProductVariant có)
-  - `OrderItem`: orderId FK, productId, variantId (nullable), quantity, unitPrice (từ client DTO), tax, discount
-  - `Refund`: orderId FK, amount, status (PENDING/APPROVED/REJECTED/COMPLETED), reason
-  - `Outbox`: eventType, payload (JSONB), status (PENDING/PUBLISHED/FAILED), retryCount (max 5)
-- **CQRS Structure**:
-  - **Commands**: CreateOrder (Saga), UpdateOrderStatus, CreateRefund, ApproveRefund, RejectRefund
-  - **Queries**: GetOrder, GetOrders (paginated), GetRefunds, GetRefund
-  - **Events**: OrderCreatedEvent, OrderStatusUpdatedEvent (stubs)
-  - **Handlers**: CreateOrderHandler (Saga), UpdateOrderStatusHandler, RefundHandlers, etc.
-- **Checkout Saga (CreateOrderHandler)**:
-  1. Reserve inventory: gọi `ADJUST_STOCK` (Product TCP) với delta âm cho từng item; nếu 1 item fail giữa chừng thì compensate bằng cách gọi lại `ADJUST_STOCK` với delta dương cho các item đã trừ trước đó
-  2. Create Order+Items in DB tx (status=PENDING) — **transaction riêng, tách khỏi bước 1**
-  3. Charge payment via Payment TCP with idempotency key=order.id (compensate khi response trả về fail: release stock + cancel order)
-  4. On success: 2nd tx updates status=PROCESSING + writes Outbox row (same tx)
-  - **Gap (price-trust)**: bản thân Orders service (`CreateOrderHandler`) tin tưởng hoàn toàn `unitPrice` trong request, không tự gọi Product để re-validate. Gateway có 2 đường gọi tới đây: `POST /cart/checkout` (flow khách hàng bình thường) CÓ set `unitPrice` server-side từ Product trước khi gọi Orders, nhưng `POST /orders` (tạo trực tiếp, quyền admin/`ORDER.CREATE`) thì forward thẳng `unitPrice` client gửi — nên gap thực tế chỉ khai thác được qua đường thứ 2
-  - **Gap (failure window)**: bước 1 và bước 2 là 2 transaction riêng biệt — nếu process crash giữa 2 bước, stock đã bị trừ vĩnh viễn nhưng order chưa được tạo (không có outbox event để trigger compensation)
-  - **Gap (uncaught exception)**: handler chỉ compensate khi `paymentProvider.capture()` trả về `{success: false}` — nếu TCP call tới Payment timeout/exception (không phải response fail rõ ràng), lỗi sẽ propagate lên không được catch, stock reserved không được release
-- **Outbox Pattern**:
-  - OutboxWorker cron (@Cron EVERY_SECOND, batch 20): reads PENDING rows, fans out via TCP ClientProxy.emit(), marks PUBLISHED or increments retry
-  - Transactional: Order creation + Outbox write in same DB tx = no lost events
-- **Cart (Redis-backed)**:
-  - Key: `cart:{userId}`, TTL 30 days
-  - CRUD via CachedService
-- **State Machine** (order-status.constant.ts):
-  - Transitions: PENDING → PROCESSING → PAID → SHIPPED → DELIVERED (+ CANCELLED/REFUNDED)
-  - Enforced via canTransition() check, each transition writes Outbox event
-- **TCP Patterns**: CREATE_ORDER, UPDATE_ORDER_STATUS, GET_ORDER, GET_ORDERS, CREATE_REFUND, APPROVE_REFUND, REJECT_REFUND, etc.
-- **Gaps**: 
-  - Refund→Payment compensation (money return) not implemented (status bookkeeping only)
-  - Full refund on PAID/SHIPPED order won't auto-transition to REFUNDED (state machine edge case)
+- **Entities**: `Order` (9 trạng thái, `version`, `expiresAt/paidAt/deliveredAt`, `cancelReason`, `refundStatus/refundedAmount/refundedAt`, `paymentIntentId/paymentCheckoutUrl`, `trackingCode`, `voucherCode/discountAmount`, snapshot địa chỉ phẳng, soft-delete), `OrderItem`, `Refund` (chỉ cho hoàn hàng). Bảng `outbox`/`processed_messages` thuộc `libs/messaging`.
+- **Commands**: `Checkout`, `PreparePayment` (chốt #2), `CancelOrder`, `RequestReturn`, `ExpirePendingOrders`, `CompleteDeliveredOrders`, `HandlePaymentEvent`, `HandleInventoryEvent`, `HandleShippingEvent`. **Queries**: `GetOrder`, `GetOrders`, `GetRefunds`.
+- **Module con**: `cart/` (Redis, `deductItems`), `clients/` (Inventory/Payment/Product/Promotion TCP), `pricing/` (`OrderPricingService`, `money.ts`), `order-state/` (`OrderTransitionService`, `OrderCancellationService`, `OrderVersionConflictError`), `messaging/` (3 consumer Kafka), `jobs/` (`OrderLifecycleScheduler`: 30s hết hạn, 10 phút auto COMPLETED).
+- **State machine** (`order-status.constant.ts`): PENDING_PAYMENT → PAID → FULFILLING → SHIPPED → DELIVERED → COMPLETED; huỷ từ PENDING_PAYMENT/PAID/FULFILLING; DELIVERED → REFUNDING → REFUNDED. Mọi đổi trạng thái qua `OrderTransitionService` (`UPDATE ... WHERE version` + outbox cùng TX).
+- **TCP Patterns**: CHECKOUT, GET_PAYMENT_LINK, CANCEL_ORDER, REQUEST_RETURN, GET_ORDER, GET_ORDERS, GET_REFUNDS, cart (`CART_MESSAGE_PATTERN`).
+- **Đã xoá ở cutover**: `saga/`, `CreateOrderHandler`, `ConfirmOrderPaymentHandler`, `PaymentEventsController` TCP, `UpdateOrderStatusHandler`, Create/Approve/RejectRefund, `OrderCreatedHandler`/event cũ, `OutboxWorker`.
+- **Gaps**: `GET_ORDERS`/`GET_ORDER` không kiểm tra chủ sở hữu; xem [design-trade-offs.md §2.1](./design-trade-offs.md).
 
 ### 5. Payment Service (`apps/payment/`)
-**Mục đích**: Payment processing, webhook handling, idempotency  
-**Kiến trúc**: Minimal CQRS (no events, direct TCP emit)  
-**Kích thước**: ~18 files, ~407 LOC
+**Mục đích**: payment intent, webhook HMAC, hoàn tiền, simulator. **Kiến trúc**: CQRS + Outbox/Inbox. Hybrid TCP :3004 + Kafka group `payment-service`.
 
-- **Entities** (TypeORM):
-  - `PaymentTransaction`: orderId, idempotencyKey (unique), status (SUCCEEDED/FAILED), amount, failureReason (nullable), createdAt
-  - `PaymentWebhookLog`: eventId (unique), orderId, processedAt — chỉ 4 field, dùng thuần cho dedup (không có cột provider/signature/status)
-- **CQRS Structure**:
-  - **Commands**: ChargePayment, HandlePaymentWebhook
-  - **Queries**: GetTransaction
-  - **NO Events folder** — emit directly via TCP ClientProxy.emit()
-- **Providers**:
-  - `PaymentProvider` interface (charge, verifyWebhook)
-  - `SimulatedPaymentProvider` (always succeeds, default)
-  - **Planned (scaffold only, not implemented)**: vnpay, momo (via env PAYMENT_PROVIDER)
-- **Charge Flow**:
-  - Idempotent via idempotencyKey (unique constraint)
-  - Calls provider → persists transaction → emits payment_succeeded/payment_failed to Orders TCP
-- **Webhook Flow**:
-  - Gateway POST /webhooks/payments (no JWT, HMAC-SHA256 verified via PAYMENT_WEBHOOK_SECRET env)
-  - Dedup via PaymentWebhookLog.eventId
-  - Currently only logs (does NOT update PaymentTransaction status) — source of truth is charge path
-- **TCP Patterns**: CHARGE_PAYMENT, HANDLE_PAYMENT_WEBHOOK, GET_TRANSACTION
+- **Entities**: `PaymentTransaction` (= intent: `PENDING|SUCCEEDED|FAILED|CANCELLED`, `expiresAt`, `checkoutUrl`, `paidAt`), `PaymentWebhookLog` (dedup `eventId`), `PaymentRefund` (unique `orderId`).
+- **Commands**: `CreatePaymentIntent`, `HandlePaymentWebhook`, `SimulatePayment`, `CancelPaymentIntent`, `RefundPayment`, `HandlePaymentCommandMessage`. **Queries**: `GetTransaction`, `GetPaymentIntent`.
+- **Providers**: `PaymentProvider` (`createIntent`, `refund`, `signWebhook`, `verifyWebhook`) + `SimulatedPaymentProvider` (DI token `PAYMENT_PROVIDER`); `PaymentAutoSimulatorService` (`PAYMENT_SIM_MODE`).
+- **Kafka**: consume `payment-commands` (`CancelPaymentIntent`, `RefundPayment`); produce `payment-events` qua outbox.
+- **TCP**: CREATE_INTENT, HANDLE_WEBHOOK, GET_INTENT, SIMULATE_PAYMENT, GET_TRANSACTION. **Đã xoá**: `CHARGE_PAYMENT`, `ChargePaymentHandler`, client TCP ngược về Orders.
 
 ### 6. Notification Service (`apps/notification/`)
-**Mục đích**: Event-driven notifications (email, push)  
-**Kiến trúc**: Plain event listeners (intentionally NO CQRS)  
-**Kích thước**: ~13 files, minimal LOC
+**Mục đích**: email theo event Orders. **Kiến trúc**: plain (không CQRS). Hybrid TCP :3005 + Kafka consumer group `notification-service`.
 
-- **Entity**:
-  - `SentNotification`: channel (EMAIL/PUSH), status (SENT/FAILED), sourceEvent, userId, content
-- **Event Listeners** (TCP @EventPattern):
-  - `order-events.controller.ts`:
-    - `order.created` → resolve user email via User TCP (GET_USER_INFO) → send via EmailProvider
-    - `order.status_updated` → similar flow
-- **Providers**:
-  - `EmailProvider` interface (send)
-  - `SimulatedEmailProvider` (logs only, default)
-  - `PushProvider` interface (sendPush)
-  - `SimulatedPushProvider` (logs only, wired in DI but NEVER CALLED — push notifications non-functional)
-  - **Planned (scaffold only)**: Resend/Brevo for email, FCM for push
-- **Note**: "Simulate first, real later" strategy per CLAUDE.md; SMS explicitly dropped from scope
-- **Gap**: PushProvider wired but never invoked by any controller
+- **Entity**: `SentNotification` (channel EMAIL/PUSH, status SENT/FAILED, sourceEvent).
+- **Consumer**: `OrderEventsController` (`@EventPattern('order-events', Transport.KAFKA)` → `KafkaConsumerRunner`: inbox, retry 3, DLQ). `OrderCreated`/`OrderStatusChanged` gửi email; type khác chỉ đánh dấu inbox.
+- **Providers**: `EmailProvider`/`SimulatedEmailProvider` (log); `PushProvider` đã đăng ký DI nhưng chưa handler nào gọi.
 
 ### 7. Review Service (`apps/review/`)
-**Mục đích**: Product reviews & ratings with purchase verification  
-**Kiến trúc**: Full CQRS  
-**Kích thước**: ~13 files, minimal LOC
+**Mục đích**: đánh giá có verify đã mua. **Kiến trúc**: Full CQRS.
 
-- **Entity**:
-  - `Review`: unique [userId, productId, orderId], rating (int), comment (nullable). **Không có soft-delete** (không có `@DeleteDateColumn`)
-- **CQRS Structure**:
-  - **Commands**: chỉ có `CreateReview` — **chưa có Update/Delete command hay handler**
-  - **Queries**: `GetReviewsByProduct` (theo productId)
-- **Purchase Verification**:
-  - CreateReviewHandler calls Orders TCP (GET_ORDER) to verify:
-    - Order belongs to claimed user
-    - Order status is PAID/SHIPPED/DELIVERED
-    - Order items contain claimed productId
-  - Server-side verification (doesn't trust client-supplied combo)
-- **TCP Patterns**: `CREATE_REVIEW`, `GET_REVIEWS_BY_PRODUCT` (chỉ 2 pattern — không có GET_REVIEWS/DELETE_REVIEW), gọi outbound `GET_ORDER` tới Orders
+- **Entity**: `Review` (unique `[userId, productId, orderId]`, rating, comment).
+- **Commands/Queries**: `CreateReview`; `GetReviewsByProduct`. Verify qua Orders TCP `GET_ORDER`: đúng chủ, `status ∈ {PAID,FULFILLING,SHIPPED,DELIVERED,COMPLETED}`, chứa `productId`.
 
 ### 8. Promotion Service (`apps/promotion/`)
-**Mục đích**: Voucher management & discount calculation  
-**Kiến trúc**: Full CQRS, self-contained  
-**Kích thước**: ~16 files, minimal LOC
+**Mục đích**: voucher; nối checkout. **Kiến trúc**: Full CQRS. Hybrid TCP :3007 + Kafka consumer group `promotion-service`.
 
-- **Entity**:
-  - `Voucher`: code (unique), discountType (PERCENTAGE/FIXED), discountValue, minOrderValue, expiresAt, usageLimit, usageCount
-- **CQRS Structure**:
-  - **Commands**: CreateVoucher, UpdateVoucher, ApplyVoucher (calculates discount)
-  - **Queries**: GetVouchers, GetVoucher
-- **Concurrency Safety**:
-  - ApplyVoucherHandler uses pessimistic_write row lock on voucher in DB tx
-  - Validates: expiry, usageLimit, minOrder
-  - Increments usageCount atomically
-- **No Outbound Calls**: Fully self-contained (Orders decides whether to apply discount returned)
-- **TCP Patterns**: CREATE_VOUCHER, GET_VOUCHERS, APPLY_VOUCHER
+- **Entities**: `Voucher`, `VoucherRedemption` (`RESERVED|CONFIRMED|RELEASED`, unique `orderId`).
+- **TCP**: CREATE_VOUCHER, GET_VOUCHERS, GET_AVAILABLE_VOUCHERS, APPLY_VOUCHER (cũ), VALIDATE_VOUCHER, RESERVE_VOUCHER, RELEASE_VOUCHER. **Kafka** `order-events`: `OrderPaid` → CONFIRMED; `OrderCancelled{paid:false}` → release.
+- Quy tắc kiểm tra/công thức ở `domain/voucher-rules.ts` (hàm thuần); khoá voucher → redemption (pessimistic).
+
+### 9. Inventory Service (`apps/inventory/`)
+**Mục đích**: sở hữu tồn kho và giữ hàng. **Kiến trúc**: Full CQRS + Outbox/Inbox. Hybrid TCP :3008 + Kafka group `inventory-service`.
+
+- **Entities**: `StockItem` (`onHand`, `reserved`, `variantId?`), `Reservation` (`RESERVED|COMMITTED|RELEASED|EXPIRED|RESTOCKED`, `expiresAt`).
+- **Commands**: `ReserveStock`, `ReleaseReservation`, `AdjustStock`, `ExpireReservations`, `HandleInventoryCommandMessage`. **Queries**: `CheckReservation`, `GetAvailability`. `ReservationService` (nhận `EntityManager`) có `commit`/`restock`.
+- **Kafka**: consume `inventory-commands` (`CommitInventory`, `ReleaseInventory`, `RestockInventory`); phát `InventoryCommitted`/`InventoryCommitFailed`. Job hết hạn `ReservationExpiryJob`.
+- **TCP**: RESERVE, CHECK_RESERVATION, RELEASE, ADJUST_STOCK, GET_AVAILABILITY.
+
+### 10. Shipping Service (`apps/shipping/`)
+**Mục đích**: vận đơn với carrier mô phỏng, webhook giao hàng. **Kiến trúc**: Full CQRS + Outbox/Inbox. Hybrid TCP :3009 + Kafka group `shipping-service`.
+
+- **Entity**: `Shipment` (`CREATED|DELIVERED|CANCELLED|FAILED`, `trackingCode`, `orderId` unique).
+- **Kafka**: consume `shipping-commands` (`CreateShipment` retry 3 → DLQ → `ShipmentFailed`; `CancelShipment`); phát `ShipmentCreated`/`ShipmentDelivered`/`ShipmentFailed`.
+- **TCP**: HANDLE_WEBHOOK (HMAC `SHIPPING_WEBHOOK_SECRET`), SIMULATE_DELIVERY, GET_SHIPMENT. `DeliveryTimerService` (`SHIPPING_SIM_DELIVER_DELAY_MS`); `SHIPPING_PROVIDER` = `SimulatedShippingProvider`.
 
 ---
 
 ## Shared Libraries (Libs)
 
 ### `libs/common/`
-**Mục đích**: Base exception filters, common config, tracing setup  
-**Kích thước**: ~15 files, ~600 LOC
-
-- **Exception Handling**:
-  - `AbstractRpcExceptionFilter`: Base class converts HttpException/TypeORM errors (23505 unique, 23502 FK, 23503 not null, class-validator) → RpcException (statusCode, message, error, timestamp)
-  - Per-service subclass (e.g., UserRpcExceptionFilter) overrides getUniqueConstraintMessage()
-- **Configuration**:
-  - `CommonConfigModule`: ConfigModule.forRoot global + env validation
-  - Required env vars: DB_HOST/PORT/USER/PASSWORD/NAME, REDIS_HOST/PORT, JWT_ACCESS_SECRET/EXPIRATION, JWT_REFRESH_SECRET/EXPIRATION, API_KEY
-- **Utilities**:
-  - `PaginationQueryDto` / `PaginatedResult<T>`: DTO for paginated queries + response
-  - `setupTracing()`: OpenTelemetry + Prometheus metrics initialization (called in every app's main.ts with unique metrics port)
-- **Note**: `src/constant/cmd.ts` (CMD object) looks like stale duplicate of `libs/constant/message-pattern.constant.ts` — flag as dead code
+- **Exception Handling**: `AbstractRpcExceptionFilter` (HttpException/TypeORM/class-validator → RpcException); subclass theo service.
+- **Configuration**: `CommonConfigModule` (ConfigModule global + `validateEnv`). **Bắt buộc**: `DB_*`, `REDIS_HOST/PORT`, `JWT_ACCESS_*`, `JWT_REFRESH_*`, `API_KEY`, `KAFKA_BROKERS`, `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET`. **Tuỳ chọn** (validate): `KAFKA_TOPIC_PARTITIONS`, `KAFKA_CONSUMER_MAX_ATTEMPTS`, `KAFKA_CONSUMER_RETRY_BACKOFF_MS`, `OUTBOX_RELAY_INTERVAL_MS`, `OUTBOX_MAX_RETRY`, `INVENTORY_EXPIRY_GRACE_SECONDS`, `PAYMENT_SIM_MODE`, `PAYMENT_SIM_DELAY_MS`, `PUBLIC_API_BASE_URL`, `ORDER_PAYMENT_TTL_SECONDS`, `ORDER_RETURN_WINDOW_DAYS`, `SHIPPING_SIM_MODE`, `SHIPPING_SIM_DELIVER_DELAY_MS`, `NODE_ENV`. Đọc trực tiếp qua `ConfigService` (không validate): `ORDER_TAX_RATE`, `ORDER_SHIPPING_FEE_FLAT`, `CART_TTL_SECONDS`, `CORS_ORIGINS`, `THROTTLE_*`, `DB_POOL_*`.
+- **Utilities**: `PaginationQueryDto`/`PaginatedResult<T>`, `setupTracing()` (mỗi app một metrics port).
+- **Note**: `src/constant/cmd.ts` là bản trùng/cũ của `libs/constant/message-pattern.constant.ts` (dead code).
 
 ### `libs/database/`
-**Mục đích**: TypeORM configuration, migrations, database setup  
-**Kích thước**: ~20 files (including migrations)
-
-- **DatabaseModule**:
-  - `TypeOrmModule.forRootAsync()` with config factory
-  - `autoLoadEntities: true` (auto-discovers entities from importing modules)
-  - `synchronize: false` (use migrations, never auto-schema-sync)
-  - `migrationsRun: true` (auto-run pending migrations on app start)
-  - Connection pool: max:50, min:5, idleTimeout:30s, connectionTimeout:5s
-- **Database**: PostgreSQL 15 (via docker-compose)
-- **Migrations** (8 total, in `src/migrations/`):
-  1. InitSchema (users, roles, initial structure)
-  2. AddOutboxTable (orders.outbox)
-  3. AddProductCatalogEntities (products, brands, categories, attributes, variants)
-  4. DropProductVersionColumnDefault (schema cleanup)
-  5. AddOrderSagaAndRefund (order statuses, refund table)
-  6. AddRbacAndAddressBook (user roles detail, address table)
-  7. AddPaymentNotificationReviewPromotion (payment, notification, review, promotion schemas)
-  8. AddUserAvatarUrl (user avatar_url column)
-- **DataSource**: TypeORM CLI config for migrations (`src/data-source.ts`)
+- `DatabaseModule`: `autoLoadEntities`, `synchronize:false`, `migrationsRun:true`, pool max 50/min 5 (`DB_POOL_MAX/MIN`).
+- **Migrations** (`src/migrations/`): bộ cũ tới `AddUserAvatarUrl` (1790335853906), sau đó theo thứ tự: `AddProductsCreatedAtIndex`, `AddKafkaOutboxAndInbox`, `AddOrderLifecycleColumns`, `AddInventoryTables`, `AddPaymentIntentAndRefund`, `AddShipments`, `AddVoucherRedemptions`, `FinalizeOrderStatusAndStockOwnership` (chốt enum order status, bỏ cột `stock`, bỏ default outbox). Mọi migration mới idempotent, có `down`.
+- **DataSource**: TypeORM CLI (`src/data-source.ts`); `loadtest/migrate.js` dựng DB trống bằng `schema:sync` + fake migration cũ.
 
 ### `libs/cached/`
-**Mục đình**: Redis client, caching service, health indicator  
-**Kích thước**: ~8 files, ~200 LOC
-
-- **CachedModule**: @Global, ioredis client initialization
-- **CachedService**:
-  - `set(key, value, ttl?)`: store with optional TTL
-  - `get(key)`: retrieve (returns parsed JSON or null)
-  - `del(key)`: delete
-- **RedisHealthIndicator**: Health check integration (terminus)
-- **Retry Strategy**: Configured in ioredis client (exponential backoff)
-- **Used for**:
-  - Cart storage (`cart:{userId}`)
-  - Refresh tokens (`refresh_token:{userId}:{sessionId}`)
-  - Rate-limit tracking (ThrottlerGuard)
-  - Idempotency key dedup (IdempotencyInterceptor)
-  - Future: product catalog caching (roadmap)
+`CachedModule` (@Global, ioredis), `CachedService` (`get/set(ttl)/del`; chưa có `SET NX`), `RedisHealthIndicator`. Dùng cho cart, refresh token, throttle, idempotency.
 
 ### `libs/media/`
-**Mục đích**: MinIO (S3-compatible) file upload & presigned URLs  
-**Kích thước**: ~8 files, ~150 LOC
+`MediaModule` (@Global), `MediaService` (`uploadFile`, `getPresignedUrl`), bucket `ecommerce-media` tự tạo; ảnh product, avatar.
 
-- **MediaModule**: @Global
-- **MinIO Client Setup**:
-  - Auto-creates 'ecommerce-media' bucket on init
-  - Host: MINIO_HOST env, port: MINIO_PORT, credentials: MINIO_ROOT_USER/PASSWORD
-- **MediaService**:
-  - `uploadFile(file, folder)`: Upload to MinIO, return object path (not full URL)
-  - `getPresignedUrl(objectPath, expirySeconds)`: Generate temporary download URL
-- **Usage**: Product images, user avatars uploaded here
-- **Docker**: MinIO container in docker-compose.yml (port 9000 API, 9001 console)
+### `libs/messaging/` (`@lib/messaging`)
+- `MessagingModule.forService({source, relay?})`; `OutboxWriter.append(manager, {topic, type, orderId, payload})`; `OutboxRelayService` (`SKIP LOCKED`, ack broker mới `PUBLISHED`); `InboxService` (`processed_messages`); `KafkaConsumerRunner.run` (inbox + TX + retry + DLQ + `afterCommit` + `onExhausted`); `KafkaProducerService`; `ensureKafkaTopics`; envelope; entities `OutboxMessage`, `ProcessedMessage`. Int-spec: `libs/messaging/test/*.int-spec.ts`.
 
 ### `libs/constant/`
-**Mục đích**: Shared constants (ports, message patterns, permissions)  
-**Structure**: Flat files (no `src/` subdirectory, not in nest-cli.json as lib project)
-
-- **`port-tcp.constant.ts`** (tên export thật là `PORT_TCP`, key có hậu tố `_TCP_PORT`):
-  ```ts
-  export const PORT_TCP = {
-    USER_TCP_PORT: 3001,
-    ORDER_TCP_PORT: 3002,
-    PRODUCT_TCP_PORT: 3003,
-    PAYMENT_TCP_PORT: 3004,
-    NOTIFICATION_TCP_PORT: 3005,
-    REVIEW_TCP_PORT: 3006,
-    PROMOTION_TCP_PORT: 3007,
-  };
-  ```
-- **`message-pattern.constant.ts`** (canonical, supersedes libs/common's stale CMD):
-  - Message pattern objects per domain (USER_MESSAGE_PATTERN, ORDER_MESSAGE_PATTERN, etc.)
-  - Key không có prefix domain (vd: `CREATE_ORDER`, không phải `ORDER_CREATE`), giá trị string là snake_case không dấu chấm (vd: `'create_order'`) — khác với `ORDER_EVENT_TYPE` (dùng dot-notation như `'order.created'`) là hằng số riêng cho **outbox event type**, không phải RPC message pattern
-  - Used in Gateway's ClientsModule registration + service route definitions
-- **`permission.constant.ts`** (chi tiết đầy đủ xem [code-standards.md](./code-standards.md#permission-model)):
-  - `Action` enum (bitmask, bit 0-3): NONE=0, CREATE=1, READ=2, UPDATE=4, DELETE=8, ALL=15
-  - `ModuleName` enum (bit 4 trở lên, **cố ý không overlap** với Action): USER=16, PRODUCT=32, ORDER=64, CAMPAIGN=128, PAYMENT=256, REVIEW=512, PROMOTION=1024
-  - Kết hợp bằng OR thường: `ModuleName.PRODUCT | Action.READ` (không shift thêm 8 bit)
-  - Permission check: `(userPermissions & required) === required`
+Flat files (không phải lib project trong nest-cli).
+- **`port-tcp.constant.ts`** (`PORT_TCP`, `NAME_SERVICE_TCP`): USER 3001, ORDER 3002, PRODUCT 3003, PAYMENT 3004, NOTIFICATION 3005, REVIEW 3006, PROMOTION 3007, INVENTORY 3008, SHIPPING 3009.
+- **`message-pattern.constant.ts`**: `*_MESSAGE_PATTERN` theo domain (giá trị snake_case không dấu chấm), gồm `INVENTORY_`, `SHIPPING_`, `PROMOTION_` (VALIDATE/RESERVE/RELEASE). Đã bỏ `PRODUCT.ADJUST_STOCK`, `ORDER.CREATE_ORDER|UPDATE_ORDER_STATUS|CREATE_REFUND|APPROVE_REFUND|REJECT_REFUND`, `PAYMENT.CHARGE_PAYMENT`, `PAYMENT_EVENT_PATTERN`.
+- **`kafka.constant.ts`**: `KAFKA_TOPIC`, `dlqTopic`, `MESSAGE_TYPE`, `CONSUMER_GROUP`, `OUTBOX_SOURCE`.
+- **`permission.constant.ts`**: `Action` (CREATE=1, READ=2, UPDATE=4, DELETE=8, ALL=15), `ModuleName` (USER=16, PRODUCT=32, ORDER=64, CAMPAIGN=128, PAYMENT=256, REVIEW=512, PROMOTION=1024); check `(userPermissions & required) === required` ([code-standards.md](./code-standards.md#permission-model)).
 
 ---
 
 ## Infrastructure & External Services
 
 ### Docker Compose (`docker-compose.yml`)
-Services (all on localhost):
-- **PostgreSQL 15**: db:5432, persistent volume
-- **Redis 7**: cache:6379
-- **Jaeger**: 16686 (UI), 4317 (gRPC OTLP), 4318 (HTTP OTLP)
-- **Prometheus**: prometheus:9090
-- **Grafana**: grafana:3100 (maps to 3000 inside container)
-- **MinIO**: minio:9000 (API), 9001 (console, default login minioadmin/minioadmin)
+- **PostgreSQL 15** :5432 · **Redis** :6379 · **Kafka** (`apache/kafka:3.8.0`, KRaft 1 broker; listener `kafka:29092` nội bộ, `localhost:9092` cho host; tắt auto-create topic) · **Jaeger** 16686/4317/4318 · **Prometheus** 9090 · **Grafana** 3100 · **MinIO** 9000/9001 (image `cgr.dev/chainguard/minio`).
+- `npm run docker:up` khởi động toàn bộ; `npm run start:all` chạy 10 app (`concurrently`).
 
 ### NestJS App Ports
-- **Gateway**: :3000 (HTTP public entry point)
-- **User Service**: :3001 (TCP)
-- **Order Service**: :3002 (TCP)
-- **Product Service**: :3003 (TCP)
-- **Payment Service**: :3004 (TCP)
-- **Notification Service**: :3005 (TCP)
-- **Review Service**: :3006 (TCP)
-- **Promotion Service**: :3007 (TCP)
+Gateway :3000 (HTTP) · User 3001 · Orders 3002 · Product 3003 · Payment 3004 · Notification 3005 · Review 3006 · Promotion 3007 · Inventory 3008 · Shipping 3009 (TCP).
 
 ### Metrics Ports (OpenTelemetry Prometheus)
-- Gateway: 9464
-- Notification: 9469
-- Review: 9470
-- Promotion: 9471
-- (Others likely follow pattern 94XX)
+Gateway 9464 · User 9465 · Product 9466 · Orders 9467 · Payment 9468 · Notification 9469 · Review 9470 · Promotion 9471 · Inventory 9472 · Shipping 9473 (`prometheus.yml` chưa có target inventory/shipping).
 
 ---
 
@@ -348,55 +175,39 @@ Services (all on localhost):
 | **Framework** | NestJS v11, TypeScript |
 | **Database** | PostgreSQL 15 + TypeORM |
 | **Cache/Session** | Redis 7 + ioredis |
+| **Messaging** | Apache Kafka (`kafkajs`, `@nestjs/microservices`) cho event/command; TCP cho RPC |
 | **File Storage** | MinIO (S3-compatible) |
-| **Auth** | JWT (15m access, 7d refresh), bcrypt (password hashing) |
-| **Design Pattern** | CQRS (@nestjs/cqrs) — mandatory for complex services |
-| **Data Patterns** | Saga (Orders checkout), Outbox (transactional event publishing), Optimistic locking (Product stock) |
-| **Communication** | NestJS TCP transport (no RabbitMQ) |
+| **Auth** | JWT (15m access, 7d refresh), bcrypt |
+| **Design Pattern** | CQRS (@nestjs/cqrs); Orchestration; Transactional Outbox + Inbox; optimistic (`version`) / pessimistic locking; circuit breaker (opossum) |
 | **Validation** | class-validator + global ValidationPipe |
-| **Observability** | OpenTelemetry (Jaeger tracing), Prometheus (metrics), Grafana (dashboards) |
-| **API Documentation** | Swagger (@nestjs/swagger) at /api/docs |
-| **Security** | Helmet, CORS, HMAC-SHA256, API key, rate limiting (Throttler + Redis), bitmask RBAC |
+| **Observability** | OpenTelemetry (Jaeger), Prometheus, Grafana |
+| **API Documentation** | Swagger at /api/docs |
+| **Security** | Helmet, CORS, HMAC-SHA256 (webhook), API key, Throttler + Redis, bitmask RBAC |
+| **Test** | Jest unit (`npm test`, mock); int-spec `npm run test:int` (Postgres; Kafka khi `INT_KAFKA=1`); k6 load test |
 
 ---
 
 ## Known Gaps & Roadmap Items
 
-1. **Product service**: Zero Redis caching (all reads hit Postgres) — opportunity for performance improvement
-2. **Event handlers**: ProductCreatedEvent, OrderCreatedEvent are console.log stubs (future Kafka→Elasticsearch sync)
-3. **Payment**: Only SimulatedPaymentProvider exists; real vnpay/momo scaffold only
-4. **Notification**: PushProvider wired but never called (push notifications non-functional)
-5. **Dependencies**: amqp-connection-manager/amqplib in package.json but RabbitMQ is fully deprecated — cleanup candidate
-6. **Orders**: `CreateOrderHandler` never re-validates `unitPrice` against Product's canonical price — Gateway's `/cart/checkout` happens to protect against this by fetching price from Product first, but the direct `POST /orders` endpoint forwards client-supplied `unitPrice` unchecked (price-trust gap at the Orders-service level, not fully mitigated by Gateway)
-7. **Refunds**: No refund→payment compensation/money-return mechanism found (currently status bookkeeping only)
-8. **Order state machine**: Full refund on PAID/SHIPPED order won't auto-transition to REFUNDED (edge case)
-9. **Env documentation**: No `.env.example` exists in repo root (user onboarding friction)
-10. **User service**: Lacks CQRS (architectural inconsistency vs. other services, may be intentional for simple CRUD)
-11. **Auth**: No explicit refresh-token rotation/renewal endpoint — Gateway's JwtAuthGuard verifies via User.VERIFY_TOKEN, but client-side renewal flow unclear
-
----
-
-## Statistics
-
-| Component | Files | Est. LOC | Pattern |
-|-----------|-------|---------|---------|
-| **Gateway** | 51 | 2,240 | No CQRS (routing-heavy) |
-| **User** | 25 | 1,098 | Plain services (no CQRS) |
-| **Product** | 56 | 1,524 | Full CQRS |
-| **Orders** | 48 | 1,387 | Full CQRS + Outbox + Saga |
-| **Payment** | 18 | 407 | Minimal CQRS |
-| **Notification** | 13 | ~200 | Event listeners (no CQRS) |
-| **Review** | 13 | ~200 | Full CQRS |
-| **Promotion** | 16 | ~250 | Full CQRS |
-| **Libs** (all) | ~70 | ~1,200 | Utilities, config, patterns |
-| **Total** | ~310 | ~8,500 | Mixed patterns by domain |
+1. **Chưa kiểm chứng trên stack thật**: toàn bộ migration mới, int-spec, seed, load test, e2e checkout (xem [target-checkout-architecture.md §10](./target-checkout-architecture.md)).
+2. **Product**: chưa cache Redis cho catalog; `ProductCreatedEvent` là stub.
+3. **Payment/Shipping**: chỉ simulator; cổng/carrier thật chưa làm (cần ký raw body).
+4. **Notification**: `PushProvider` chưa được gọi.
+5. **Dependencies**: `amqp-connection-manager`/`amqplib` còn trong package.json nhưng RabbitMQ không dùng.
+6. **Ownership**: `GET /orders*`, `GET /orders/:id/refunds`, addresses không kiểm tra chủ sở hữu.
+7. **Voucher**: crash giữa `RESERVE_VOUCHER` và TX tạo đơn làm kẹt lượt; `/vouchers/apply` cũ tiêu lượt không gắn đơn.
+8. **Idempotency Gateway**: get-then-set không nguyên tử (thiếu `SET NX`).
+9. **Refund**: `FAILED` không retry được; hoàn hàng gặp `PaymentRefundFailed` kẹt `REFUNDING`.
+10. **Env**: không có `.env.example` (README liệt kê biến bắt buộc).
+11. **Auth**: chưa có endpoint refresh token; `gateway.controller.spec.ts` boilerplate đang fail.
 
 ---
 
 ## How to Navigate This Codebase
 
-1. **Understanding Startup**: Read `apps/gateway/main.ts` (entry HTTP), then trace TCP connections to one microservice (e.g., `apps/user/main.ts`)
-2. **Understanding CQRS**: Start with `apps/product/src/commands/` (simple CRUD), then `apps/orders/src/commands/create-order.handler.ts` (Saga complexity)
-3. **Understanding Data Flow**: Trace a checkout request: Gateway controller → Orders TCP → Product TCP (reserve) → Payment TCP (charge) → Outbox worker → Notification TCP
-4. **Understanding Observability**: Check `setupTracing()` call in any app's main.ts, then view Jaeger at http://localhost:16686
-5. **Database Schema**: Run migrations via `npm run typeorm -- migration:show`, view schema in Postgres directly, or check `libs/database/src/migrations/`
+1. **Startup**: `apps/gateway/src/main.ts` (HTTP), rồi một service hybrid (`apps/orders/src/main.ts`: TCP + Kafka + `ensureKafkaTopics`).
+2. **CQRS**: `apps/product/src/commands/` (CRUD đơn giản), rồi `apps/orders/src/commands/handlers/checkout.handler.ts` (orchestration).
+3. **Data flow checkout**: Gateway `cart.controller.ts` → Orders `CheckoutHandler` → Inventory `RESERVE` (TCP) → Order `PENDING_PAYMENT` + outbox → Payment `CREATE_INTENT` → simulator webhook → `payment-events` → `HandlePaymentEventHandler` → `inventory-commands` → `shipping-commands` → `shipping-events` (đọc [system-architecture-orders-flow.md](./system-architecture-orders-flow.md)).
+4. **Messaging**: `libs/messaging/src/consumer/kafka-consumer.runner.ts`, `outbox/outbox-relay.service.ts`.
+5. **Observability**: `setupTracing()` trong `main.ts`, Jaeger tại http://localhost:16686.
+6. **Database schema**: [database-schema.md](./database-schema.md); migration trong `libs/database/src/migrations/`.

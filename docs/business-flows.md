@@ -1,11 +1,13 @@
 # Business Flows & Business Rules
 
-**Ngày cập nhật**: 2026-10-05
+**Ngày cập nhật**: 2026-10-15
 **Nguồn**: đối chiếu trực tiếp với code (`apps/*`, `libs/*`) — không dựa vào tài liệu cũ.
 
 Tài liệu mô tả **luồng nghiệp vụ end-to-end** (nhiều service phối hợp) và **business rules** đang được code thực thi. Chi tiết xử lý bên trong từng service xem [module-processing-flows.md](./module-processing-flows.md). Các lựa chọn thiết kế và đánh đổi xem [design-trade-offs.md](./design-trade-offs.md).
 
-> Luồng checkout/state machine dưới đây là **hiện trạng**; thiết kế đích (chưa code) xem [target-checkout-architecture.md](./target-checkout-architecture.md).
+> Luồng checkout/state machine dưới đây là **checkout v2 event-driven** (đã cutover, Saga đồng bộ cũ đã xoá). Thiết kế gốc + trạng thái triển khai: [target-checkout-architecture.md](./target-checkout-architecture.md).
+>
+> **Trạng thái kiểm chứng**: code + unit test (mock) + build đã xong; các luồng Postgres/Kafka thật (migration, int-spec, e2e) **chưa kiểm chứng trên stack thật** tại thời điểm viết.
 >
 > Quy ước: **[ĐÃ CÓ]** = code đang thực thi; **[CHƯA CÓ]** = nghiệp vụ mong đợi nhưng code chưa làm (ghi rõ để tránh hiểu nhầm).
 
@@ -16,13 +18,17 @@ Tài liệu mô tả **luồng nghiệp vụ end-to-end** (nhiều service phố
 | Domain | Service | Dữ liệu chính | Lưu ở |
 |---|---|---|---|
 | Danh tính & phân quyền | `user` (:3001) | User, Role, UserRole, Address | PostgreSQL + Redis (session) |
-| Danh mục & tồn kho | `product` (:3003) | Product, Category, Brand, Attribute, Variant | PostgreSQL |
-| Giỏ hàng, đơn hàng, hoàn tiền | `orders` (:3002) | Cart (Redis), Order, OrderItem, Refund, Outbox | Redis + PostgreSQL |
-| Thanh toán | `payment` (:3004) | PaymentTransaction, PaymentWebhookLog | PostgreSQL |
-| Thông báo | `notification` (:3005) | SentNotification | PostgreSQL |
+| Danh mục sản phẩm | `product` (:3003) | Product, Category, Brand, Attribute, Variant (không còn tồn kho) | PostgreSQL |
+| Tồn kho & giữ hàng | `inventory` (:3008) | StockItem, Reservation, Outbox, Inbox | PostgreSQL |
+| Giỏ hàng, đơn hàng, hoàn hàng | `orders` (:3002) | Cart (Redis), Order, OrderItem, Refund, Outbox, Inbox | Redis + PostgreSQL |
+| Thanh toán | `payment` (:3004) | PaymentTransaction (intent), PaymentWebhookLog, PaymentRefund, Outbox, Inbox | PostgreSQL |
+| Vận chuyển | `shipping` (:3009) | Shipment, Outbox, Inbox | PostgreSQL |
+| Thông báo | `notification` (:3005) | SentNotification, Inbox | PostgreSQL |
 | Đánh giá | `review` (:3006) | Review | PostgreSQL |
-| Khuyến mãi | `promotion` (:3007) | Voucher | PostgreSQL |
+| Khuyến mãi | `promotion` (:3007) | Voucher, VoucherRedemption, Inbox | PostgreSQL |
 | Cổng vào | `gateway` (:3000) | — (stateless; rate-limit & idempotency ở Redis) | Redis |
+
+Giao tiếp: RPC đồng bộ qua **TCP**, event/command bất đồng bộ qua **Kafka** (Outbox → relay at-least-once → Inbox, xem [system-architecture.md](./system-architecture.md)).
 
 Tất cả service dùng chung **1 database PostgreSQL** (`ecommerce`) và **1 bộ migration** (`libs/database/src/migrations`), nhưng mỗi service chỉ đọc/ghi bảng của mình; liên kết giữa domain là **UUID tham chiếu mềm** (không FK chéo service), xem trade-off #3.
 
@@ -85,7 +91,7 @@ Client ── POST /user/logout {userId,sessionId} ──▶ Redis DEL refresh_t
 ```
 Admin(PRODUCT|CREATE) ─▶ POST /products ─▶ Product.CreateProduct
    ├ category phải tồn tại (404), brand (nếu có) phải tồn tại (404)
-   ├ slug unique (DB) ; price ≥ 0, stock ≥ 0
+   ├ slug unique (DB) ; price ≥ 0 (tồn kho không nằm ở Product — nhập bằng `POST /products/:id/stock-adjustments` → Inventory)
    ├ lưu Product, publish ProductCreatedEvent lên EventBus nội bộ (hiện chỉ console.log — stub cho Elasticsearch)
 Admin ─▶ POST /products/:id/images (multipart) ─▶ Gateway upload MinIO (bucket chung, path products/{uuid}-{tên})
          └ đọc product → append path vào mảng images → UpdateProduct (không phải 1 transaction)
@@ -94,106 +100,142 @@ Admin ─▶ Brand / Attribute / Variant CRUD (Product service)
    └ Xoá: Product = hard delete (`remove`), Variant = soft delete (`softRemove`), Brand/Attribute = hard delete
 ```
 
-**Rules**: `getProducts` hỗ trợ lọc category/brand/giá/isActive/search (ILIKE tên), sort chỉ trong whitelist `name|price|stock|createdAt`, phân trang mặc định page=1, limit=20.
+**Rules**: `getProducts` hỗ trợ lọc category/brand/giá/isActive/search (ILIKE tên), sort chỉ trong whitelist `name|price|createdAt`, phân trang mặc định page=1, limit=20. Gateway ghép `available`/`stockStatus` (`IN_STOCK|OUT_OF_STOCK|UNKNOWN`) từ Inventory bằng đúng 1 lần gọi theo mảng id; Inventory lỗi/chậm (>1.5s) → `UNKNOWN`, không làm lỗi danh sách.
 
-### 2.4 Giỏ hàng → Checkout → Đơn hàng (luồng trọng tâm)
+### 2.4 Giỏ hàng → Checkout v2 → Đơn hàng (luồng trọng tâm)
 
 ```
 Client ─ POST /cart/items {productId, quantity≥1} ─▶ Orders.Cart (Redis key cart:{userId}, TTL 30 ngày)
         └ addItem: cùng productId → CỘNG dồn quantity; updateItem: GHI ĐÈ quantity; removeItem; clear
         └ Cart chỉ lưu {productId, quantity} — KHÔNG lưu giá, KHÔNG kiểm tra tồn tại/tồn kho lúc thêm
 
-Client ─ POST /cart/checkout {shippingAddress} ─▶ Gateway.CartController.checkout
-  1) lấy cart; rỗng → 400 "Cart is empty"
-  2) với mỗi item: gọi Product.GET_PRODUCT → unitPrice = giá HIỆN TẠI (snapshot); product không tồn tại → 400
-  3) Orders.CreateOrder  ──────────────────────────────────────────────┐
-  4) thành công → clearCart(userId) → trả order                         │
-                                                                         ▼
-Orders.CreateOrderHandler (Saga điều phối, không có transaction bao trùm)
-  subtotal = Σ qty×unitPrice ; tax = round(subtotal × ORDER_TAX_RATE[0.1], 2) ; ship = ORDER_SHIPPING_FEE_FLAT[30000]
-  total = subtotal + tax + ship
-  S1  Reserve:  với mỗi item gọi Product.ADJUST_STOCK(delta = -qty)
-        └ 1 item fail giữa chừng ⇒ hoàn (delta=+qty) các item đã trừ trước đó, ném lỗi gốc (409 "Không đủ tồn kho"…)
-  S2  Tx#1: INSERT Order(status=PENDING) + OrderItems (snapshot địa chỉ giao hàng, giá)
-  S3  Capture: Payment.CHARGE_PAYMENT {orderId, amount, idempotencyKey=orderId}  (timeout 10s)
-        ├ success=false HOẶC lỗi TCP/timeout (đã bắt, quy về "Payment service unavailable")
-        │   ⇒ Compensation: release stock (best-effort, lỗi chỉ log) + Order=CANCELLED ⇒ HTTP 402
-        └ success ⇒ S4
-  S4  Tx#2: Order=PROCESSING + INSERT Outbox('order.created', {orderId,userId,totalAmount}) → trả Order
-Sau commit: OutboxWorker (mỗi 1s) fan-out event → Notification gửi email.
+Client ─ POST /cart/checkout  (x-idempotency-key BẮT BUỘC)
+         {items:[{productId}], shippingAddress, voucherCode?}  ─▶ Gateway ─TCP─▶ Orders.CheckoutHandler
+   Body chỉ chứa định danh món được chọn; `userId`/`quantity`/`unitPrice` trong body → 400 (forbidNonWhitelisted).
+   userId lấy từ token; số lượng lấy từ cart; giá lấy từ Product (server-side); `variantId` → 400 (chưa hỗ trợ).
+  1) Pricing: mọi món phải có trong cart (không thì 400), không trùng productId; subtotal = Σ qty×giá;
+     tax = round(subtotal×ORDER_TAX_RATE[0.1]); ship = ORDER_SHIPPING_FEE_FLAT[30000];
+     có voucherCode → Promotion.VALIDATE_VOUCHER(subtotal) → discount; total = subtotal + tax + ship − discount
+  2) Inventory.RESERVE(orderId, items, ttl=ORDER_PAYMENT_TTL_SECONDS[900], replaces=[đơn PENDING_PAYMENT cũ có món trùng])
+       hết hàng → 409, dừng (chưa có gì để hoàn). Reserve atomic toàn bộ hoặc không món nào.
+  3) Promotion.RESERVE_VOUCHER(code, orderId, userId, subtotal) — sau reserve kho; lỗi → Inventory.RELEASE + lỗi gốc
+  4) TX Orders: INSERT Order(PENDING_PAYMENT, expiresAt, voucherCode, discountAmount) + items + Outbox(OrderCreated);
+       huỷ các đơn `replaces` (CANCELLED/REPLACED + CancelPaymentIntent + OrderCancelled{paid:false})
+       TX lỗi → Inventory.RELEASE + RELEASE_VOUCHER best-effort
+  5) Chốt #1: Inventory.CHECK_RESERVATION phải valid; không đạt → huỷ đơn (CANCELLED/RESERVATION_INVALID), 409, không tạo intent
+  6) Payment.CREATE_INTENT(orderId, amount=total, idempotencyKey=orderId, expiresAt=hạn giữ hàng) → checkoutUrl
+       lỗi/timeout → đơn vẫn PENDING_PAYMENT (chỉ log); user lấy lại link bằng GET /orders/:id/pay
+  7) KHÔNG xoá cart. Trả 201 {orderId, status:'PENDING_PAYMENT', payment_url, expiresAt}
+       payment_url = ${PUBLIC_API_BASE_URL}/orders/{id}/pay   (endpoint cần JWT → client tự gọi, nhận {paymentUrl, expiresAt})
+```
+
+**Sau khi có `payment_url`** (chốt #2 + thanh toán + fulfillment, bất đồng bộ qua Kafka):
+
+```
+GET /orders/:id/pay (chốt #2): chủ đơn (khác → 404), PENDING_PAYMENT, chưa quá expiresAt, reservation còn RESERVED → {paymentUrl, expiresAt}
+                               không đạt → huỷ đơn nếu cần + 409 "Hết hàng hoặc hết hạn giữ hàng"
+Cổng TT (simulator) ─ POST /webhooks/payments (HMAC) ─▶ Payment: TX payment=SUCCEEDED + outbox PaymentSucceeded
+  └ payment-events ▶ Orders: PENDING_PAYMENT→PAID; outbox OrderPaid + CommitInventory; trừ cart đúng món đã đặt
+      └ inventory-commands ▶ Inventory: RESERVED→COMMITTED, trừ onHand; outbox InventoryCommitted
+          └ inventory-events ▶ Orders: PAID→FULFILLING; outbox CreateShipment
+              └ shipping-commands ▶ Shipping: carrier mô phỏng → trackingCode; outbox ShipmentCreated
+                  └ shipping-events ▶ Orders: FULFILLING→SHIPPED
+Webhook giao hàng (POST /webhooks/shipping, HMAC; hoặc admin POST /shipments/:orderId/deliver) ▶ Shipping: ShipmentDelivered
+  └ Orders: SHIPPED→DELIVERED (deliveredAt); scheduler: DELIVERED quá ORDER_RETURN_WINDOW_DAYS[7] → COMPLETED
+Phụ: OrderPaid → Promotion confirm voucher; OrderStatusChanged → Notification gửi email theo trạng thái.
 ```
 
 **Business rules**
-- **Giá**: luôn là snapshot tại thời điểm tạo đơn (`order_items.unit_price`), thay đổi giá product sau đó không ảnh hưởng đơn cũ.
-- **Phí**: thuế 10% (`ORDER_TAX_RATE`) tính trên subtotal; phí ship cố định 30.000 (`ORDER_SHIPPING_FEE_FLAT`); cả hai đọc từ ConfigService. Chưa có logic ship theo vùng/cân nặng.
-- **Địa chỉ giao hàng** được copy (denormalize) vào `orders` — đổi/xoá Address Book của user không làm đổi đơn cũ.
-- **Tồn kho** bị trừ **ngay** ở S1 (không có khái niệm "giữ chỗ" riêng); đơn `PENDING/PROCESSING` đã chiếm kho.
-- **Idempotency thanh toán**: key = `orderId` → Payment trả lại kết quả cũ nếu gọi lặp, không charge 2 lần.
-- **[CHƯA CÓ]** Voucher **chưa được tích hợp** vào checkout: `total` không trừ giảm giá; `POST /vouchers/apply` là API tính toán độc lập (xem 2.8).
-- **[CHƯA CÓ]** `POST /orders` (Gateway) nhận thẳng `userId` + `unitPrice` từ client — chỉ `/cart/checkout` mới lấy giá server-side. Xem rủi ro ở [design-trade-offs.md §5](./design-trade-offs.md#5-rủi-ro--gap-đã-xác-minh-trong-code).
+- **Giá**: snapshot tại thời điểm tạo đơn (`order_items.unit_price`); thay đổi giá sau đó không ảnh hưởng đơn cũ. Server là nguồn của giá và số lượng — không bao giờ tin từ client.
+- **Phí**: thuế 10% (`ORDER_TAX_RATE`) tính trên subtotal; ship cố định 30.000 (`ORDER_SHIPPING_FEE_FLAT`); cả hai đọc từ ConfigService.
+- **Địa chỉ giao hàng** được copy (denormalize) vào `orders`.
+- **Tồn kho**: reserve ≠ trừ thật. `available = onHand − reserved`. Reserve giữ hàng 15 phút (`reserved += q`); chỉ khi thanh toán thành công mới `CommitInventory` (`onHand −= q`, `reserved −= q`). Hết hạn/huỷ → release.
+- **Chỉ thanh toán khi còn hàng**: 3 chốt — #1 sau khi tạo đơn (trước khi cấp intent), #2 lúc `GET /orders/:id/pay`, #3 `expiresAt` của intent = hạn reservation (không dài hơn). Khoảng hở (trả sát giờ, webhook tới sau khi đơn đã `CANCELLED`) → tự hoàn toàn bộ số đã thu.
+- **Cart**: giữ nguyên khi checkout / huỷ / hết hạn / thanh toán lỗi; chỉ trừ đúng món + số lượng đã đặt khi `PAID` (phần dư và món không chọn được giữ). Lỗi trừ cart chỉ log.
+- **Checkout lại khi đã có đơn chờ**: luôn tạo đơn mới; đơn `PENDING_PAYMENT` cũ có **bất kỳ** món trùng bị huỷ toàn bộ (`REPLACED`, trả phần giữ trong cùng transaction reserve); đơn cũ không trùng món thì không đụng. Đơn không sửa item sau khi tạo.
+- **Idempotency**: Gateway bắt buộc `x-idempotency-key` cho checkout (thiếu → 400; Redis lỗi → 503 fail-closed; key scope theo user + path; replay trả response đã cache); Payment idempotent theo `orderId` (createIntent, refund); Kafka consumer idempotent theo `eventId` (Inbox) và theo trạng thái đơn.
+- **Voucher**: giữ lượt lúc checkout (`usageCount += 1`, redemption `RESERVED`); `OrderPaid` → `CONFIRMED`; `OrderCancelled{paid:false}` (hết hạn, `PaymentFailed`, `REPLACED`, huỷ khi chưa thanh toán) → `RELEASED`, trả lượt. Đơn đã thanh toán rồi huỷ/hoàn thì **không** trả lượt.
 
 ### 2.5 Vòng đời đơn hàng (state machine)
 
 `apps/orders/src/order-status.constant.ts`
 
 ```
-PENDING ──▶ PROCESSING ──▶ PAID ──▶ SHIPPED ──▶ DELIVERED ──▶ REFUNDED
-   │            │            │
-   └────────────┴────────────┴──▶ CANCELLED          (CANCELLED, REFUNDED là trạng thái cuối)
+PENDING_PAYMENT ──▶ PAID ──▶ FULFILLING ──▶ SHIPPED ──▶ DELIVERED ──▶ COMPLETED
+      │               │           │                         │
+      └───────────────┴───────────┴──▶ CANCELLED            └──▶ REFUNDING ──▶ REFUNDED
 ```
 
-| Từ | Được chuyển tới |
-|---|---|
-| PENDING | PROCESSING, CANCELLED |
-| PROCESSING | PAID, CANCELLED |
-| PAID | SHIPPED, CANCELLED |
-| SHIPPED | DELIVERED |
-| DELIVERED | REFUNDED |
-| CANCELLED / REFUNDED | — |
+| Từ | Sang | Trigger |
+|---|---|---|
+| PENDING_PAYMENT | PAID | `PaymentSucceeded` |
+| PENDING_PAYMENT | CANCELLED | user huỷ (`USER`) / hết 15' (`PAYMENT_EXPIRED`) / `PaymentFailed` (`PAYMENT_FAILED`) / bị thay bởi checkout mới (`REPLACED`) / chốt #1-#2 thấy hết hàng (`RESERVATION_INVALID`) |
+| PAID | FULFILLING | `InventoryCommitted` |
+| PAID, FULFILLING | CANCELLED | user huỷ (`USER`); `InventoryCommitFailed` (`INVENTORY_COMMIT_FAILED`); `ShipmentFailed` (`SHIPMENT_FAILED`, chỉ từ FULFILLING) |
+| FULFILLING | SHIPPED | `ShipmentCreated` |
+| SHIPPED | DELIVERED | `ShipmentDelivered` |
+| DELIVERED | REFUNDING | user hoàn hàng, trong 7 ngày kể từ `deliveredAt` |
+| DELIVERED | COMPLETED | scheduler 10 phút/lần, quá cửa sổ đổi trả (đơn `REFUNDING` không bị đụng) |
+| REFUNDING | REFUNDED | `PaymentRefunded` |
 
-- Chuyển trạng thái thủ công: `PATCH /orders/:id/status` (`ORDER|UPDATE`). Chuyển sai luồng → 400 `Không thể chuyển trạng thái từ X sang Y`.
-- Mỗi lần chuyển: trong **cùng 1 transaction** lưu Order + ghi Outbox `order.status_updated {orderId,userId,previousStatus,status}`.
-- Checkout tự động đưa đơn `PENDING → PROCESSING`. Sự kiện `payment_succeeded` do Payment emit được Orders nhận (`PaymentEventsController`) và tự chuyển `PROCESSING → PAID` (kèm Outbox `order.status_updated` nên Notification gửi thêm mail). Event có thể tới khi đơn còn `PENDING` nên handler chờ thử lại ngắn; nếu vẫn không kịp, đơn ở `PROCESSING` và admin PATCH thủ công.
-- **Lưu ý**: Cancel thủ công (`→ CANCELLED`) **không** hoàn kho và **không** hoàn tiền (chỉ checkout-fail mới có compensation).
+Terminal: `CANCELLED`, `REFUNDED`, `COMPLETED`. `SHIPPED`/`DELIVERED` không huỷ được; `COMPLETED` không hoàn hàng được (400).
 
-### 2.6 Hoàn tiền (Refund)
+- **Mọi** đổi trạng thái qua `OrderTransitionService`: `canTransition` + `UPDATE ... WHERE id AND version` + Outbox (`OrderStatusChanged` + event/command kèm theo) **cùng 1 transaction**. Lệch version = thua race: user → **409** "Đơn vừa thay đổi, hãy tải lại"; consumer Kafka → rollback, retry, đọc lại đơn rồi quyết định tiếp; scheduler → bỏ qua, lần sau quét lại.
+- Race huỷ vs `ShipmentCreated` ở `FULFILLING`: bên cập nhật trước thắng. Huỷ thắng → `CANCELLED`, `ShipmentCreated` tới sau → Orders gửi `CancelShipment`. `ShipmentCreated` thắng → `SHIPPED`, huỷ bị 409.
+- Race huỷ vs `CommitInventory` ở `PAID`: `RestockInventory` cùng partition key `orderId` với `CommitInventory` nên Inventory xử lý đúng thứ tự (commit trước → restock cộng lại; reservation còn `RESERVED` → restock chỉ release). `InventoryCommitted` tới đơn đã `CANCELLED` thì bỏ qua, không tạo shipment.
+- **Huỷ**: `POST /orders/:id/cancel` — `PENDING_PAYMENT`: release kho, huỷ intent, không hoàn tiền; `PAID`/`FULFILLING`: `refundStatus=PENDING`, hoàn `total − phí ship`, restock (và `CancelShipment` nếu `FULFILLING`). `refundStatus` (`NONE|PENDING|SUCCEEDED|FAILED`) chỉ để hiển thị, cập nhật khi Payment báo `PaymentRefunded`/`PaymentRefundFailed` (kèm `refundedAmount`, `refundedAt`); `FAILED` cần admin xử lý tay.
+- **Dữ liệu cũ khi cutover**: migration chuyển `PENDING`/`PROCESSING` → `PENDING_PAYMENT` với `expiresAt = now()` (scheduler huỷ ngay) — đơn `PROCESSING` cũ đã thu tiền sẽ bị huỷ **không hoàn tiền**; chấp nhận vì dữ liệu hiện chỉ là seed/dev.
 
-```
-Customer/Admin(ORDER|CREATE) ─ POST /refunds {orderId, amount≥0.01, reason}
-   ├ order không tồn tại → 404
-   ├ order.status ∉ {PAID, SHIPPED, DELIVERED} → 400
-   ├ Σ(refund không phải REJECTED) + amount > order.totalAmount → 400 "vượt quá tổng giá trị đơn hàng"
-   └ tạo Refund(PENDING)
+### 2.6 Hoàn tiền
 
-Admin(ORDER|UPDATE) ─ POST /refunds/:id/approve  (1 transaction)
-   ├ refund phải PENDING (404/400)
-   ├ refund → COMPLETED
-   └ nếu Σ(COMPLETED + refund này) ≥ order.totalAmount VÀ canTransition(order.status, REFUNDED)
-        → Order = REFUNDED   (chỉ hợp lệ khi order đang DELIVERED)
-Admin ─ POST /refunds/:id/reject → refund PENDING → REJECTED
-```
+Số tiền hoàn luôn là `refundAmount = totalAmount − shippingFee` (= subtotal + tax − discount): **phí ship không hoàn**, voucher không trả. Payment nhận `amount` tường minh, mỗi đơn hoàn **tối đa 1 lần** (`payment_refunds.orderId` unique, hoàn cả đơn, không hoàn một phần).
 
-- Cho phép **hoàn một phần nhiều lần**, tổng không vượt `totalAmount`.
-- Enum có `APPROVED` nhưng code đi thẳng `PENDING → COMPLETED` (không có bước APPROVED riêng).
-- **[CHƯA CÓ]** Hoàn tiền thật qua provider, hoàn kho, và không tự `REFUNDED` khi order đang PAID/SHIPPED dù hoàn đủ. Approve chỉ cập nhật sổ sách.
+| Luồng | Trigger | Kết quả |
+|---|---|---|
+| Huỷ khi đã thanh toán (`PAID`/`FULFILLING`) | `POST /orders/:id/cancel` | `CANCELLED` + `RefundPayment` + `RestockInventory`; `refundStatus` PENDING → SUCCEEDED/FAILED |
+| Inventory commit lỗi | `InventoryCommitFailed` | `CANCELLED(INVENTORY_COMMIT_FAILED)` + `RefundPayment` (không restock vì kho chưa trừ) |
+| Shipping lỗi vĩnh viễn (retry 3 → DLQ) | `ShipmentFailed` | `CANCELLED(SHIPMENT_FAILED)` + `RefundPayment` + `RestockInventory` |
+| Thanh toán muộn vào đơn đã huỷ | `PaymentSucceeded` tới đơn `CANCELLED` | `refundStatus=PENDING` + `RefundPayment` **toàn bộ số đã thu** (đơn chưa từng PAID, không trừ ship — mặc định đã chọn, chưa có xác nhận riêng) |
+| Hoàn hàng sau giao | `POST /orders/:id/return {reason}` (`DELIVERED`, trong 7 ngày) | `REFUNDING` + Refund `PENDING` + `RefundPayment`; `PaymentRefunded` → `REFUNDED` + Refund `COMPLETED` + `RestockInventory` (nhập kho ngay khi hoàn tiền xong, không theo dõi vận đơn trả về) |
+
+- Payment replay refund đã có bản ghi: phát lại kết quả đã lưu (không gọi provider) với eventId mới → Orders xử lý idempotent theo trạng thái.
+- `PaymentRefundFailed`: luồng huỷ → `refundStatus=FAILED` + log error; luồng hoàn hàng → đơn giữ `REFUNDING`, chỉ có log error (admin xử lý tay). Refund `FAILED` không retry được (unique `orderId`).
+- Các endpoint refund cũ (`POST /refunds`, `/refunds/:id/approve|reject`, hoàn một phần nhiều lần) **đã bị xoá**; còn `GET /orders/:id/refunds` (đọc).
 
 ### 2.7 Thanh toán & Webhook
 
 ```
-(Nội bộ) Orders ─TCP─▶ Payment.CHARGE_PAYMENT
-   ├ tìm PaymentTransaction theo idempotencyKey → có rồi: trả kết quả đã lưu (không gọi provider)
-   ├ provider.charge(orderId, amount)  (hiện: SimulatedPaymentProvider luôn success, transactionId "SIMULATED-{orderId}")
-   ├ lưu PaymentTransaction(SUCCEEDED|FAILED, failureReason)
-   └ emit payment_succeeded | payment_failed → Orders (`PaymentEventsController`)
+Orders ─TCP─▶ Payment.CREATE_INTENT {orderId, amount, idempotencyKey=orderId, expiresAt}
+   ├ idempotencyKey đã có → trả intent cũ ở mọi trạng thái (không tạo mới)
+   └ mới → INSERT intent PENDING (expiresAt = hạn giữ hàng), trả {intentId, status, checkoutUrl, expiresAt}
+        checkoutUrl = ${PUBLIC_API_BASE_URL}/simulator/pay/{intentId}
 
-(Ngoài) Provider ─ POST /webhooks/payments {payload, signature} ─▶ Gateway (KHÔNG JwtAuth) ─▶ Payment.HANDLE_WEBHOOK
-   ├ verifyWebhook: HMAC-SHA256(JSON.stringify(payload), PAYMENT_WEBHOOK_SECRET) so với signature → sai = 400
-   ├ eventId đã có trong payment_webhook_logs → trả {processed:false, alreadyProcessed:true}
-   └ chưa có → ghi log eventId (+orderId) → {processed:true}
+Simulator (Gateway /simulator/pay/:intentId; PAYMENT_SIM_MODE=manual bấm nút, hoặc auto-success/auto-fail hẹn giờ PAYMENT_SIM_DELAY_MS)
+   └ Payment.SIMULATE_PAYMENT → {payload, signature} → Payment.HANDLE_WEBHOOK  (đi đúng đường HMAC như cổng thật)
+
+(Ngoài) Provider ─ POST /webhooks/payments {payload, signature} ─▶ Gateway (KHÔNG JwtAuth, vẫn cần x-api-key) ─▶ Payment.HANDLE_WEBHOOK (1 transaction)
+   ├ HMAC-SHA256(JSON.stringify(payload), PAYMENT_WEBHOOK_SECRET) so bằng timingSafeEqual → sai = 400
+   ├ eventId đã có trong payment_webhook_logs → {alreadyProcessed:true} (webhook trùng)
+   ├ orderId/amount phải khớp intent (400); intent không tồn tại → 404
+   ├ SUCCEEDED + intent PENDING|CANCELLED → SUCCEEDED + outbox PaymentSucceeded (kể cả intent đã CANCELLED: tiền đã thu)
+   ├ FAILED + PENDING → FAILED + outbox PaymentFailed ; tổ hợp khác → no-op
+   └ CancelPaymentIntent (Orders ra lệnh khi huỷ): UPDATE ... WHERE orderId AND status='PENDING' → CANCELLED (nguyên tử với webhook)
 ```
 
-- Webhook hiện **chỉ ghi nhận + khử trùng**, chưa cập nhật Order/Transaction.
-- `GET /payments/:orderId/transaction` (`PAYMENT|READ`) trả giao dịch mới nhất của đơn.
+- `GET /payments/:orderId/transaction` (`PAYMENT|READ`) trả giao dịch (intent) mới nhất của đơn.
+- Không tích hợp cổng ngoài: Payment/Shipping chỉ là simulator. `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` bắt buộc (không có fallback). Trang `/simulator/*` tắt (404) khi `NODE_ENV=production`.
+
+### 2.7a Vận chuyển (Shipping)
+
+```
+Orders: FULFILLING → outbox CreateShipment {recipient, items} ─Kafka shipping-commands─▶ Shipping (inbox + TX)
+   ├ chưa có shipment → carrier mô phỏng trả trackingCode → shipment CREATED + outbox ShipmentCreated{trackingCode}
+   ├ đã có → no-op (carrier không bị gọi lại)
+   └ carrier lỗi 3 lần (SHIPPING_SIM_MODE=fail để thử) → DLQ shipping-commands.dlq + shipment FAILED + outbox ShipmentFailed{reason}
+CancelShipment (huỷ khi FULFILLING / ShipmentCreated tới đơn đã CANCELLED): CREATED → CANCELLED; khác → no-op
+Giao hàng: webhook POST /webhooks/shipping {payload, signature} (HMAC SHIPPING_WEBHOOK_SECRET) hoặc admin POST /shipments/:orderId/deliver
+   hoặc timer SHIPPING_SIM_DELIVER_DELAY_MS>0 → ShipmentDelivered{deliveredAt}
+```
 
 ### 2.8 Voucher
 
@@ -208,35 +250,37 @@ User(PROMOTION|READ) ─ POST /vouchers/apply {code, orderValue>0}  (1 transacti
 GET /vouchers/available → voucher chưa hết hạn và còn lượt
 ```
 
-- **Không gắn user**: 1 user có thể apply lặp nhiều lần (mỗi lần tốn 1 lượt) — chỉ giới hạn bằng `usageLimit` toàn cục.
-- Lượt dùng **không được hoàn** nếu đơn sau đó bị huỷ hoặc không bao giờ tạo (vì chưa nối với checkout).
+- `POST /vouchers/apply` (cũ) giữ nguyên: tính + tiêu lượt ngay, **không gắn đơn** nên không có cách trả lượt. Checkout dùng luồng riêng của Promotion: `VALIDATE_VOUCHER` (chỉ tính, không ghi) → `RESERVE_VOUCHER` (giữ lượt, idempotent theo `orderId`) → `OrderPaid` confirm / `OrderCancelled{paid:false}` release (xem §2.4).
+- **Không gắn user**: không giới hạn lượt theo user — chỉ giới hạn bằng `usageLimit` toàn cục.
+- `orderValue` của validate/reserve là **subtotal** (trước thuế/ship). Redemption `CONFIRMED` không bao giờ được trả lượt.
 
 ### 2.9 Đánh giá sản phẩm
 
 ```
 User(REVIEW|CREATE) ─ POST /reviews {userId, productId, orderId, rating 1..5, comment?}
    └ Review service gọi Orders.GET_ORDER(orderId) qua TCP rồi kiểm tra:
-        order tồn tại (404) VÀ order.userId == userId VÀ order.status ∈ {PAID,SHIPPED,DELIVERED} VÀ order.items chứa productId
+        order tồn tại (404) VÀ order.userId == userId VÀ order.status ∈ {PAID,FULFILLING,SHIPPED,DELIVERED,COMPLETED} VÀ order.items chứa productId
         sai bất kỳ điều kiện → 403 "Chỉ có thể review sản phẩm đã mua trong đơn hàng hợp lệ"
    └ unique (userId, productId, orderId) → review lần 2 cho cùng cặp → "You have already reviewed this product for this order"
 GET /reviews/product/:productId → danh sách mới nhất trước (không phân trang, không tính điểm trung bình)
 ```
 
-- Rule "đã mua" = đơn thuộc user + đã thanh toán + chứa sản phẩm. `REFUNDED`/`CANCELLED` **không** được review.
+- Rule "đã mua" = đơn thuộc user + đã thanh toán + chứa sản phẩm. `PENDING_PAYMENT`/`CANCELLED`/`REFUNDING`/`REFUNDED` **không** được review.
 - `userId` lấy từ body chứ không từ JWT (xem rủi ro §5 của trade-offs).
 
 ### 2.10 Thông báo theo sự kiện đơn hàng
 
 ```
-OutboxWorker (Orders) ── emit 'order.created' / 'order.status_updated' ──▶ Notification (EventPattern)
-   ├ gọi User.GET_USER_INFO(userId) lấy email; lỗi → fallback dùng userId làm recipient (log warn)
-   ├ EmailProvider.send (Simulated: chỉ log)
-   └ ghi sent_notifications {channel=EMAIL, recipient, subject, body, status SENT|FAILED, sourceEvent}
+Orders Outbox ─ Kafka order-events (OrderCreated | OrderStatusChanged | OrderPaid | OrderCancelled) ─▶ Notification (consumer group notification-service)
+   ├ Inbox (processed_messages) khử trùng theo eventId; retry 3 lần rồi DLQ order-events.dlq
+   ├ OrderCreated / OrderStatusChanged: gọi User.GET_USER_INFO(userId) lấy email (lỗi → fallback userId làm recipient, log warn)
+   │    → EmailProvider.send (Simulated: chỉ log) → ghi sent_notifications {channel=EMAIL, recipient, subject, body, status SENT|FAILED, sourceEvent}
+   └ OrderPaid / OrderCancelled: chỉ đánh dấu inbox, không gửi (đã có OrderStatusChanged đi kèm)
 Admin ─ (TCP) GET_SENT_NOTIFICATIONS {recipient?} → lịch sử gửi  [chưa có route Gateway tương ứng]
 ```
 
 - Push (`PushProvider`) đã đăng ký DI nhưng **chưa có handler gọi**.
-- Nội dung email là chuỗi cứng (tiếng Việt), chưa có template.
+- Nội dung email là chuỗi cứng (tiếng Việt), chưa có template. Email at-least-once: nếu commit lỗi sau khi provider đã gửi thì có thể trùng.
 
 ### 2.11 Upload media
 
@@ -254,15 +298,19 @@ Admin ─ (TCP) GET_SENT_NOTIFICATIONS {recipient?} → lịch sử gửi  [chư
 | Thiếu/sai `x-api-key` | gateway | 401 |
 | Vượt rate limit | gateway | 429 |
 | Slug brand / SKU / attribute trùng | product | 409 |
-| Không đủ tồn kho / stock đang bị cập nhật đồng thời (sau 1 lần retry) | product | 409 |
-| Cart rỗng khi checkout | gateway | 400 |
-| Thanh toán thất bại / Payment service không phản hồi | orders | 402 |
-| Chuyển trạng thái đơn không hợp lệ | orders | 400 |
-| Refund sai trạng thái đơn / vượt tổng tiền | orders | 400 |
+| Không đủ tồn kho khi reserve (kèm `productIds`) / điều chỉnh làm `onHand < reserved` | inventory | 409 |
+| Checkout thiếu `x-idempotency-key` / body có `userId`,`quantity`,`unitPrice` / món không có trong cart / `variantId` | gateway, orders | 400 |
+| Hết hàng hoặc hết hạn giữ hàng (checkout, `GET /orders/:id/pay`) | orders | 409 |
+| Đơn vừa thay đổi (lệch version) khi huỷ/hoàn hàng | orders | 409 |
+| Huỷ đơn đã `SHIPPED`/`DELIVERED`/`REFUNDING` | orders | 409 |
+| Hoàn hàng quá 7 ngày / đơn `COMPLETED` / không phải `DELIVERED` | orders | 400 |
+| Đơn không tồn tại hoặc không thuộc user (pay/cancel/return) | orders | 404 |
+| Redis lỗi ở route bắt buộc idempotency | gateway | 503 |
 | Review sản phẩm chưa mua | review | 403 |
 | Voucher hết hạn / hết lượt / chưa đủ giá trị tối thiểu | promotion | 400 |
 | Request trùng `x-idempotency-key` đang xử lý | gateway | 409 |
-| Webhook sai chữ ký | payment | 400 |
+| Webhook sai chữ ký (payment / shipping) | payment, shipping | 400 |
+| Voucher không tồn tại | promotion | 404 |
 
 ---
 
@@ -271,5 +319,5 @@ Admin ─ (TCP) GET_SENT_NOTIFICATIONS {recipient?} → lịch sử gửi  [chư
 - [module-processing-flows.md](./module-processing-flows.md) — xử lý chi tiết từng module
 - [design-trade-offs.md](./design-trade-offs.md) — quyết định thiết kế, đánh đổi, gap
 - [system-architecture.md](./system-architecture.md) — kiến trúc tổng thể
-- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Saga/Outbox chi tiết
-- [target-checkout-architecture.md](./target-checkout-architecture.md) — **thiết kế đích (chưa implement)**: checkout reserve + payment async, Kafka, Inventory/Shipping, state machine mới
+- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Orchestrator/Outbox/Inbox chi tiết
+- [target-checkout-architecture.md](./target-checkout-architecture.md) — thiết kế đã chốt + trạng thái triển khai (§10)

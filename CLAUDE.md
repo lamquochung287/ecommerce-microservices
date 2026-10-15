@@ -6,8 +6,8 @@
 
 - **Mô hình**: NestJS Monorepo Microservices.
 - **Giao thức Giao tiếp (Communication)**:
-  - Giao tiếp nội bộ giữa các microservices được thực hiện qua **TCP** (sử dụng `@nestjs/microservices`).
-  - Hệ thống **KHÔNG CÒN DÙNG RabbitMQ**, toàn bộ giao tiếp dựa vào TCP transport.
+  - **RPC đồng bộ** (Gateway → service, reserve/validate/check giữa service) qua **TCP** (`@nestjs/microservices`).
+  - **Event/command bất đồng bộ** giữa service qua **Kafka** (Transactional Outbox → relay at-least-once → consumer có Inbox, retry 3 lần rồi DLQ `<topic>.dlq`). Quyết định "không dùng broker" trước đây đã **bị đảo** khi triển khai checkout v2; RabbitMQ vẫn không dùng. Service tham gia Kafka là app hybrid (TCP + Kafka).
 - **API Gateway**: Entry point duy nhất để clients gọi tới. Gateway nhận HTTP request (RESTful) và phân phối xuống các microservices qua TCP.
 
 ## 2. Cấu trúc Thư mục (Directory Structure)
@@ -20,12 +20,14 @@ Dự án tuân theo chuẩn NestJS Monorepo, chia làm `apps` (các ứng dụng
 
 - **`apps/gateway`** (HTTP :3000): entry duy nhất, auth/phân quyền/idempotency/throttle, routing TCP. [apps/gateway/CLAUDE.md](./apps/gateway/CLAUDE.md).
 - **`apps/user`** (TCP :3001): User, JWT, Role (RBAC bitmask), Address. [apps/user/CLAUDE.md](./apps/user/CLAUDE.md).
-- **`apps/orders`** (TCP :3002): Cart (Redis), Order, Refund, Checkout Saga, Outbox. [apps/orders/CLAUDE.md](./apps/orders/CLAUDE.md).
-- **`apps/product`** (TCP :3003): Product/Category/Brand/Attribute/Variant + tồn kho. [apps/product/CLAUDE.md](./apps/product/CLAUDE.md).
-- **`apps/payment`** (TCP :3004): charge idempotent, webhook HMAC. [apps/payment/CLAUDE.md](./apps/payment/CLAUDE.md).
-- **`apps/notification`** (TCP :3005): email theo event Orders. [apps/notification/CLAUDE.md](./apps/notification/CLAUDE.md).
+- **`apps/orders`** (TCP :3002 + Kafka): Cart (Redis), Order state machine + optimistic lock, checkout v2 (orchestrator), huỷ/hoàn hàng, scheduler, Outbox. [apps/orders/CLAUDE.md](./apps/orders/CLAUDE.md).
+- **`apps/product`** (TCP :3003): chỉ catalog Product/Category/Brand/Attribute/Variant (tồn kho đã chuyển sang Inventory). [apps/product/CLAUDE.md](./apps/product/CLAUDE.md).
+- **`apps/payment`** (TCP :3004 + Kafka): payment intent idempotent, webhook HMAC → outbox, refund, simulator. [apps/payment/CLAUDE.md](./apps/payment/CLAUDE.md).
+- **`apps/notification`** (TCP :3005 + Kafka consumer): email theo event `order-events`. [apps/notification/CLAUDE.md](./apps/notification/CLAUDE.md).
 - **`apps/review`** (TCP :3006): review có verify đã mua. [apps/review/CLAUDE.md](./apps/review/CLAUDE.md).
-- **`apps/promotion`** (TCP :3007): voucher. [apps/promotion/CLAUDE.md](./apps/promotion/CLAUDE.md).
+- **`apps/promotion`** (TCP :3007 + Kafka consumer): voucher (validate/reserve/release/confirm). [apps/promotion/CLAUDE.md](./apps/promotion/CLAUDE.md).
+- **`apps/inventory`** (TCP :3008 + Kafka): tồn kho `stock_items` + giữ hàng `reservations` (reserve/commit/release/restock, job hết hạn). [apps/inventory/CLAUDE.md](./apps/inventory/CLAUDE.md).
+- **`apps/shipping`** (TCP :3009 + Kafka): vận đơn, carrier mô phỏng, webhook giao hàng HMAC. [apps/shipping/CLAUDE.md](./apps/shipping/CLAUDE.md).
 
 ### Libs (Shared Libraries)
 
@@ -34,22 +36,27 @@ Dự án tuân theo chuẩn NestJS Monorepo, chia làm `apps` (các ứng dụng
 - **`libs/cached`**: Chứa cấu hình và module kết nối Redis (sử dụng `ioredis`). Dùng cho caching và các tác vụ yêu cầu tốc độ cao (ví dụ: quản lý token).
 - **`libs/constant`**: `PORT_TCP`, `NAME_SERVICE_TCP`, `*_MESSAGE_PATTERN` (mọi pattern TCP), `Action`/`ModuleName` (bitmask phân quyền).
 - **`libs/media`**: `MediaService` (MinIO): upload, presigned URL.
+- **`libs/messaging`** (`@lib/messaging`): Kafka — `OutboxWriter`/`OutboxRelayService` (at-least-once, `FOR UPDATE SKIP LOCKED`), `InboxService` (`processed_messages`), `KafkaConsumerRunner` (inbox + transaction + retry + DLQ), `KafkaProducerService`, envelope chuẩn, `ensureKafkaTopics`. Topic/type/consumer group ở `libs/constant/kafka.constant.ts`.
 - Alias import: `@lib/common`, `@lib/database`, `@lib/cached`, `libs/constant/...`.
 
 ## 2.1. Kiến thức hệ thống cần nắm (đã xác minh với code)
 
 Người mới đọc [docs/onboarding-guide.md](./docs/onboarding-guide.md) trước (lộ trình đọc theo mục tiêu). Tài liệu đầy đủ trong `docs/`: [business-flows.md](./docs/business-flows.md) (luồng + rule), [module-processing-flows.md](./docs/module-processing-flows.md) (xử lý chi tiết từng module), [design-trade-offs.md](./docs/design-trade-offs.md) (trade-off + rủi ro), [system-architecture.md](./docs/system-architecture.md).
 
-- **Một DB PostgreSQL chung + một bộ migration** (`libs/database/src/migrations`, mỗi service `migrationsRun:true`, `synchronize:false`). Đổi schema = viết migration (`npm run migration:generate`). Không FK chéo service, tham chiếu bằng UUID.
+- **Một DB PostgreSQL chung + một bộ migration** (`libs/database/src/migrations`, mỗi service `migrationsRun:true`, `synchronize:false`). Đổi schema = viết migration (`npm run migration:generate`), **idempotent** (`IF NOT EXISTS`...). Không FK chéo service, tham chiếu bằng UUID. Bộ migration không dựng được DB trống: DB load test dùng `loadtest/migrate.js` (`schema:sync` + fake migration cũ).
 - **Gọi service**: `{cmd: <pattern>}` qua TCP, host hiện hardcode `localhost`. Gateway→service đi qua `TcpResilienceService` (circuit breaker + timeout 10s); service→service chỉ có `timeout()`.
-- **Event giữa service** = Outbox (Orders) + `ClientProxy.emit` tới từng subscriber; **at-most-once**, không dùng `EventBus` của CQRS cho liên-service.
-- **Checkout** (`POST /cart/checkout`): Gateway snapshot giá từ Product → Orders Saga: trừ kho (`ADJUST_STOCK`) → Order PENDING → Payment charge (idempotencyKey=orderId) → PROCESSING + Outbox; payment fail/timeout → hoàn kho + CANCELLED (402). Orders nhận `payment_succeeded` (`PaymentEventsController`) và tự chuyển `PROCESSING→PAID`; hết hàng trả 409.
+- **Event/command giữa service** = Outbox (`OutboxWriter.append(manager, ...)` cùng transaction với đổi state, key = `orderId`) → relay Kafka **at-least-once** → consumer qua `KafkaConsumerRunner` (Inbox khử trùng theo `eventId`, retry `KAFKA_CONSUMER_MAX_ATTEMPTS`=3, DLQ). Topic: `order-events`, `payment-events`, `payment-commands`, `inventory-commands`, `inventory-events`, `shipping-commands`, `shipping-events`. Không `emit` trực tiếp, không dùng `EventBus` CQRS cho liên-service. App hybrid phải gắn `Transport.TCP` cho `@MessagePattern` và `Transport.KAFKA` cho `@EventPattern`, và gọi `ensureKafkaTopics` trong `main.ts` (broker tắt auto-create topic).
+- **State machine đơn**: `PENDING_PAYMENT → PAID → FULFILLING → SHIPPED → DELIVERED → COMPLETED`; huỷ (`PENDING_PAYMENT|PAID|FULFILLING → CANCELLED`, có `cancelReason`); hoàn hàng `DELIVERED → REFUNDING → REFUNDED`. Mọi đổi trạng thái qua `OrderTransitionService` (`UPDATE ... WHERE version`, 0 dòng = lệch version → 409) + Outbox cùng transaction. Không còn `PENDING`/`PROCESSING`.
+- **Checkout v2** (`POST /cart/checkout`, **bắt buộc `x-idempotency-key`**): body `{items:[{productId}], shippingAddress, voucherCode?}` — số lượng lấy từ cart, giá từ Product, `userId` từ token (body có `userId/quantity/unitPrice` → 400). Orders: pricing (+voucher validate) → `Inventory.RESERVE` (TTL `ORDER_PAYMENT_TTL_SECONDS`=900, `replaces` các đơn chờ có món trùng) → `Promotion.RESERVE_VOUCHER` → Order `PENDING_PAYMENT` + Outbox → chốt #1 `CHECK_RESERVATION` → `Payment.CREATE_INTENT` → trả `{orderId, status, payment_url, expiresAt}` (hết hàng 409). Cart **không bị xoá** lúc checkout; chỉ trừ đúng món đã đặt khi `PaymentSucceeded`. `GET /orders/:id/pay` = chốt #2 (còn giữ hàng mới trả `{paymentUrl, expiresAt}`).
+- **Sau thanh toán** (bất đồng bộ): Payment webhook (HMAC) → `PaymentSucceeded` → Orders `PAID` (+`OrderPaid`, `CommitInventory`) → Inventory `InventoryCommitted` → Orders `FULFILLING` (+`CreateShipment`) → Shipping `ShipmentCreated` → `SHIPPED` → webhook giao hàng `ShipmentDelivered` → `DELIVERED` → scheduler `COMPLETED` sau `ORDER_RETURN_WINDOW_DAYS`=7 ngày. Lỗi: hết hạn 15' / `PaymentFailed` → `CANCELLED` + trả kho; `InventoryCommitFailed` / `ShipmentFailed` (Shipping retry 3 → DLQ) → `CANCELLED` + hoàn tiền; thanh toán muộn vào đơn đã huỷ → hoàn toàn bộ số đã thu; huỷ khi `PAID|FULFILLING` (`POST /orders/:id/cancel`) → hoàn `total − phí ship` + restock; hoàn hàng khi `DELIVERED` (`POST /orders/:id/return`). Voucher: giữ lúc checkout, trả khi đơn **chưa thanh toán** bị huỷ/hết hạn, đã thanh toán thì không trả.
+- **Simulator** (Payment/Shipping không gọi dịch vụ ngoài): `/simulator/pay/:intentId` ở Gateway (miễn `x-api-key`, 404 khi `NODE_ENV=production`) đi đúng đường webhook có HMAC; `PAYMENT_SIM_MODE=manual|auto-success|auto-fail`; giao hàng tay `POST /shipments/:orderId/deliver` hoặc `SHIPPING_SIM_DELIVER_DELAY_MS`.
+- **Tồn kho** thuộc Inventory (`stock_items`, `reservations`); Product không còn cột `stock`. `GET /products*` ghép `available/stockStatus` (`UNKNOWN` khi Inventory lỗi); điều chỉnh tay `POST /products/:id/stock-adjustments` → `INVENTORY.ADJUST_STOCK`.
 - **Auth**: access 15m + refresh 7d; session = Redis `refresh_token:{userId}:{sessionId}`; Gateway `VERIFY_TOKEN` mỗi request, permissions = OR bitmask role (tính lại mỗi request). Không có endpoint refresh.
-- **Gateway** bắt buộc header `x-api-key` cho mọi route (trừ `/health`); `x-idempotency-key` tuỳ chọn cho method ghi.
-- **Env**: `validateEnv` bắt buộc `DB_*`, `REDIS_*`, `JWT_*`, `API_KEY`. Tuỳ chọn: `ORDER_TAX_RATE`, `ORDER_SHIPPING_FEE_FLAT`, `CART_TTL_SECONDS`, `PAYMENT_WEBHOOK_SECRET`, `CORS_ORIGINS`, `THROTTLE_LIMIT_DEFAULT`, `THROTTLE_LOGIN_LIMIT` (login/register, mặc định 5/phút/IP), `DB_POOL_MAX/MIN`. Load test k6: [docs/load-testing-guide.md](./docs/load-testing-guide.md).
-- **Chạy**: `npm run docker:up` (postgres, redis, jaeger, prometheus, grafana, minio) → `npm run start:all`; `npm run seed` (dữ liệu lớn, mật khẩu `Password123`).
-- **Thiết kế đích (CHƯA implement, các mục trên vẫn là hiện trạng)**: checkout reserve kho TTL 15' + payment async (`payment_url`/webhook), Orders orchestrator qua Outbox→**Kafka** (at-least-once + inbox), thêm `apps/inventory` (:3008) và `apps/shipping` (:3009), state machine PENDING_PAYMENT→PAID→FULFILLING→SHIPPED→DELIVERED→COMPLETED (+REFUNDING→REFUNDED). Xem [docs/target-checkout-architecture.md](./docs/target-checkout-architecture.md). Chỉ code theo thiết kế này khi được giao; câu hỏi mở ở §11 của tài liệu đó cần chốt trước.
-- **Rủi ro đã biết, không lặp lại khi viết code mới**: tin `unitPrice/userId` từ client ở `POST /orders`; thiếu kiểm tra chủ sở hữu (orders, refunds, addresses); voucher chưa nối checkout; logout không auth. Danh sách đầy đủ: [design-trade-offs.md §5](./docs/design-trade-offs.md).
+- **Gateway** bắt buộc header `x-api-key` cho mọi route (trừ `/health` và `/simulator/*`); `x-idempotency-key` bắt buộc cho `POST /cart/checkout` (Redis lỗi → 503 fail-closed), tuỳ chọn ở route ghi khác.
+- **Env**: `validateEnv` bắt buộc `DB_*`, `REDIS_*`, `JWT_*`, `API_KEY`, **`KAFKA_BROKERS`**, **`PAYMENT_WEBHOOK_SECRET`**, **`SHIPPING_WEBHOOK_SECRET`** (thiếu một biến → mọi service không khởi động). Tuỳ chọn: `ORDER_TAX_RATE`, `ORDER_SHIPPING_FEE_FLAT`, `CART_TTL_SECONDS`, `ORDER_PAYMENT_TTL_SECONDS` (900), `ORDER_RETURN_WINDOW_DAYS` (7), `PUBLIC_API_BASE_URL`, `PAYMENT_SIM_MODE`, `PAYMENT_SIM_DELAY_MS`, `SHIPPING_SIM_MODE`, `SHIPPING_SIM_DELIVER_DELAY_MS`, `INVENTORY_EXPIRY_GRACE_SECONDS`, `KAFKA_TOPIC_PARTITIONS`, `KAFKA_CONSUMER_MAX_ATTEMPTS`, `KAFKA_CONSUMER_RETRY_BACKOFF_MS`, `OUTBOX_RELAY_INTERVAL_MS`, `OUTBOX_MAX_RETRY`, `CORS_ORIGINS`, `THROTTLE_LIMIT_DEFAULT`, `THROTTLE_LOGIN_LIMIT` (login/register, mặc định 5/phút/IP), `DB_POOL_MAX/MIN`. Load test k6: [docs/load-testing-guide.md](./docs/load-testing-guide.md).
+- **Chạy**: `npm run docker:up` (postgres, redis, **kafka**, jaeger, prometheus, grafana, minio) → `npm run start:all` (10 app); `npm run seed` (dữ liệu lớn, mật khẩu `Password123`; ghi thẳng `stock_items`). Khởi động Orders/Inventory/Shipping/Promotion/Notification **trước** khi có event đầu tiên (consumer `fromBeginning:false`).
+- **Trạng thái kiểm chứng**: code checkout v2 đã được viết và có unit test (mock) + build xanh; **chưa kiểm chứng trên stack thật** (migration, int-spec, Kafka, e2e) — xem [docs/target-checkout-architecture.md §10](./docs/target-checkout-architecture.md) và runbook trong `plans/261015-1700-checkout-v2-event-driven/reports/phase-14-report.md`.
+- **Rủi ro đã biết, không lặp lại khi viết code mới**: thiếu kiểm tra chủ sở hữu ở `GET /orders*`, `GET /orders/:id/refunds`, addresses; `/vouchers/apply` tiêu lượt không gắn đơn; logout không auth; idempotency Gateway get-then-set không nguyên tử; crash giữa `RESERVE_VOUCHER` và TX tạo đơn làm kẹt lượt voucher; Payment/Shipping là simulator. Đã đóng: tin `unitPrice/userId` từ client (route `POST /orders` đã xoá), voucher chưa nối checkout, outbox at-most-once, Saga trừ kho/charge đồng bộ. Danh sách đầy đủ: [design-trade-offs.md §5](./docs/design-trade-offs.md).
 
 ## 3. Công nghệ Dữ liệu (Tech Stack)
 
@@ -58,7 +65,8 @@ Người mới đọc [docs/onboarding-guide.md](./docs/onboarding-guide.md) tr�
 - **ORM**: TypeORM.
 - **Caching & In-memory Store**: Redis.
 - **Authentication**: JWT (Access Token, Refresh Token), bcrypt (hashing).
-- **Design Pattern**: CQRS (`@nestjs/cqrs`) cho product, orders, payment, review, promotion (user & notification không dùng); Saga, Transactional Outbox, optimistic/pessimistic locking, circuit breaker (opossum).
+- **Messaging**: Apache Kafka (KRaft, 1 broker local qua Docker Compose) qua `kafkajs`/`@nestjs/microservices`.
+- **Design Pattern**: CQRS (`@nestjs/cqrs`) cho product, orders, payment, review, promotion, inventory, shipping (user & notification không dùng); Orchestration (Orders điều phối bằng event/command), Transactional Outbox + Inbox, optimistic (`version`) / pessimistic locking, circuit breaker (opossum).
 
 ## 4. Quy tắc Lập trình (Coding Standards & Rules)
 

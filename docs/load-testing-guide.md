@@ -7,10 +7,12 @@ Mục tiêu: 500 user đồng thời trên VPS **2 vCPU / 4 GB**. Stack chạy t
 | File | Vai trò |
 |---|---|
 | `loadtest/docker-compose.loadtest.yml` | Override compose: giới hạn CPU/RAM, thêm container `apps`, bật remote-write cho Prometheus |
-| `loadtest/Dockerfile.apps`, `loadtest/start-apps.sh` | Gộp 8 app NestJS vào 1 container (chia sẻ CPU/RAM như trên 1 VPS) |
+| `loadtest/Dockerfile.apps`, `loadtest/start-apps.sh` | Gộp 10 app NestJS (kể cả `inventory`, `shipping`) vào 1 container (chia sẻ CPU/RAM như trên 1 VPS) |
 | `loadtest/k6/load-test.js` | Kịch bản k6 (profile `mixed`, `read`, `cart`, `checkout`, `auth`) |
 | `loadtest/collect-docker-stats.sh` | Ghi CPU/RAM từng container ra CSV |
 | `grafana/dashboards/k6-load-test.json` | Dashboard k6 (VUs, RPS, lỗi, p95) |
+
+Container `apps` cần Kafka (service `kafka` của `docker-compose.yml`, `KAFKA_BROKERS=kafka:29092`) cùng `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` (đã đặt trong `docker-compose.loadtest.yml`) và `PAYMENT_SIM_MODE=auto-success` để đơn tự đi tiếp sau checkout.
 
 Phân bổ quota (tổng 2 CPU / 4 GB, đổi bằng biến `LT_*`): apps 0.8 CPU / 2.5 GB, postgres 1.0 CPU / 1 GB, redis 0.2 CPU / 0.5 GB. Prometheus, Grafana, Jaeger không tính vào quota (trên VPS thật nên chạy ở máy khác).
 
@@ -58,8 +60,9 @@ SLO trong `thresholds` của kịch bản: lỗi server < 1% (5xx, timeout, 429)
 
 ## Hạn chế của số đo
 
-- Payment là `SimulatedPaymentProvider` (luôn success, tức thì): số đo checkout chưa gồm độ trễ cổng thanh toán thật.
+- Payment/Shipping là simulator (không có độ trễ cổng/carrier thật). Kịch bản `checkout` chỉ gọi `POST /cart/checkout` (body `{items:[{productId}], shippingAddress}`, header `x-idempotency-key` mới mỗi lần) rồi dừng ở `PENDING_PAYMENT`: số đo là phần đồng bộ (pricing + reserve + tạo đơn + intent), chưa gồm pha bất đồng bộ qua Kafka. Đơn không thanh toán tự hết hạn sau `ORDER_PAYMENT_TTL_SECONDS` (15') và trả kho.
 - Hầu hết đo qua Docker Desktop (WSL2): CPU mỗi core có thể khác VPS, nên xem kết quả là tương đối. Nên chạy lại một lần trên VPS thật trước khi chốt.
 - Trace OTLP gửi tới `localhost:4318` bên trong container `apps` (không có Jaeger ở đó), nên chi phí tracing không giống khi Jaeger chạy thật.
-- Checkout trừ kho thật: stock seed hết dần khiến checkout bị từ chối (đếm ở `lt_checkout_rejected`, không tính là lỗi server). Seed lại DB giữa các lần chạy để so sánh công bằng.
+- Checkout **giữ** kho (reserve, TTL 15'): `onHand` seed không giảm nhưng `reserved` tăng; sản phẩm hết hàng bị từ chối 409 (đếm ở `lt_checkout_rejected`, không tính là lỗi server). Checkout lặp trên cùng sản phẩm của cùng user thay thế đơn cũ (`replaces`). Seed lại DB giữa các lần chạy để so sánh công bằng.
+- **Chưa chạy lại k6 sau cutover** (kịch bản và compose chỉ được sửa mã); cần stack có Kafka và migration mới (`loadtest/migrate.js`) trước khi đo.
 - Mỗi VU dùng cố định 1 user trong `scripts/seeded-users.csv` (2000 user), nên 500 VU không đụng nhau về cart.

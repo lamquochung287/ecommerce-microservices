@@ -5,7 +5,7 @@ Microservice hybrid: TCP :3004 + Kafka (group `payment-service`). Quản lý **p
 Chi tiết thiết kế: [docs/target-checkout-architecture.md](../../docs/target-checkout-architecture.md) §5.1, §6, §7, §7.1, §10.1.
 
 ## Pattern
-- TCP (`Transport.TCP` tường minh): `create_payment_intent` · `handle_payment_webhook` · `get_payment_intent` · `simulate_payment` · `get_transaction` · `charge_payment` (Saga cũ, xoá khi cutover).
+- TCP (`Transport.TCP` tường minh): `create_payment_intent` · `handle_payment_webhook` · `get_payment_intent` · `simulate_payment` · `get_transaction`.
 - Kafka consume `payment-commands`: `CancelPaymentIntent`, `RefundPayment{amount, reason}` (qua `KafkaConsumerRunner`: inbox + transaction + retry/DLQ).
 - Kafka produce `payment-events` (qua outbox): `PaymentSucceeded{intentId, amount}`, `PaymentFailed{reason}`, `PaymentRefunded{refundId, amount}`, `PaymentRefundFailed{reason}`.
 
@@ -18,12 +18,12 @@ Chi tiết thiết kế: [docs/target-checkout-architecture.md](../../docs/targe
 
 ## Quy tắc
 - `PAYMENT_WEBHOOK_SECRET` **bắt buộc** (`validateEnv`), không có fallback. Simulator vẫn verify HMAC, không bỏ qua chữ ký.
-- Provider qua DI token `PAYMENT_PROVIDER` (`useFactory` + `ConfigService`): `charge`, `createIntent`, `refund`, `signWebhook`, `verifyWebhook`; `buildWebhook` là phần riêng của simulator (`PaymentSimulator`).
-- Mọi event ra ngoài ghi `OutboxWriter.append(manager, ...)` cùng transaction với đổi state; không `emit` trực tiếp (trừ `charge_payment` cũ).
+- Provider qua DI token `PAYMENT_PROVIDER` (`useFactory` + `ConfigService`): `createIntent`, `refund`, `signWebhook`, `verifyWebhook`; `buildWebhook` là phần riêng của simulator (`PaymentSimulator`).
+- `CHARGE_PAYMENT` và `ORDER_TCP_CLIENT` (Saga đồng bộ cũ) đã bị xoá; Payment không gọi ngược Orders.
+- Mọi event ra ngoài ghi `OutboxWriter.append(manager, ...)` cùng transaction với đổi state; không `emit` trực tiếp.
 - Env tuỳ chọn: `PAYMENT_SIM_MODE` (`manual` mặc định | `auto-success` | `auto-fail`), `PAYMENT_SIM_DELAY_MS` (3000), `PUBLIC_API_BASE_URL` (`http://localhost:3000`), `NODE_ENV`.
 
 ## Gotchas
 - HMAC trên `JSON.stringify` phụ thuộc thứ tự key; payload do simulator tạo và Gateway chuyển nguyên object. Provider thật phải ký raw body.
 - Timer auto-simulator mất khi restart (chỉ cho dev).
 - Refund `FAILED` không thử lại được (unique `orderId`): admin xử lý tay.
-- `charge_payment` (Saga cũ) vẫn ghi `payment_transactions` với `SUCCEEDED/FAILED` và `emit` TCP `payment_succeeded|payment_failed`; xoá khi cutover.

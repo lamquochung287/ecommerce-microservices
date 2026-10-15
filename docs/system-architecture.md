@@ -1,8 +1,8 @@
 # System Architecture
 
-**Ngày cập nhật**: 2026-10-05
+**Ngày cập nhật**: 2026-10-15
 
-Tài liệu này mô tả kiến trúc tổng thể của hệ thống: các thành phần, giao tiếp giữa services, và observability stack. Các flow nghiệp vụ end-to-end xem [business-flows.md](./business-flows.md); xử lý chi tiết từng module xem [module-processing-flows.md](./module-processing-flows.md); đánh đổi thiết kế & rủi ro xem [design-trade-offs.md](./design-trade-offs.md). Các pattern riêng (checkout saga, outbox, auth, gateway) tách theo từng file — xem **Tài liệu liên quan** ở cuối.
+Tài liệu này mô tả kiến trúc tổng thể của hệ thống: các thành phần, giao tiếp giữa services, và observability stack. Các flow nghiệp vụ end-to-end xem [business-flows.md](./business-flows.md); xử lý chi tiết từng module xem [module-processing-flows.md](./module-processing-flows.md); đánh đổi thiết kế & rủi ro xem [design-trade-offs.md](./design-trade-offs.md). Thiết kế checkout v2 đã chốt: [target-checkout-architecture.md](./target-checkout-architecture.md) (đã implement; phần chưa kiểm chứng trên stack thật ghi ở §10). Các pattern riêng (orchestration/outbox, auth, gateway) tách theo từng file — xem **Tài liệu liên quan** ở cuối.
 
 ---
 
@@ -16,79 +16,44 @@ Tài liệu này mô tả kiến trúc tổng thể của hệ thống: các th�
                                              ▼
                           ┌──────────────────────────────┐
                           │     API GATEWAY (:3000)      │
-                          │   (HTTP REST Entry Point)    │
-                          │                              │
-                          │ • Auth (JWT validation)      │
-                          │ • Rate limiting (Redis)      │
-                          │ • Idempotency (Redis)        │
-                          │ • Request logging            │
+                          │ • Auth (JWT) + RBAC bitmask  │
+                          │ • Rate limit / Idempotency   │
+                          │   (Redis)                    │
                           │ • CORS + Helmet + API key    │
+                          │ • Simulator /simulator/*     │
                           └──────────┬───────────────────┘
-                                     │ TCP Transport (point-to-point)
-                    ┌────────────────┼────────────────┐
-                    │                │                │
-                    ▼                ▼                ▼
-        ┌─────────────────┐  ┌──────────────┐  ┌──────────────┐
-        │  USER SERVICE   │  │ORDER SERVICE │  │PRODUCT       │
-        │    (:3001)      │  │  (:3002)     │  │SERVICE       │
-        │                 │  │              │  │(:3003)       │
-        │ • Auth          │  │ • Cart       │  │              │
-        │ • Users         │  │ • Saga       │  │ • Catalog    │
-        │ • Roles         │  │ • Inventory  │  │ • Inventory  │
-        │ • Addresses     │  │ • Outbox     │  │ • Variants   │
-        │ • Permissions   │  │   Pattern    │  │              │
-        └─────────────────┘  └──────────────┘  └──────────────┘
-                                     │
-                    ┌────────────────┼────────────────┐
-                    │                │                │
-                    ▼                ▼                ▼
-        ┌─────────────────┐  ┌──────────────┐  ┌──────────────┐
-        │PAYMENT SERVICE  │  │NOTIFICATION  │  │REVIEW        │
-        │    (:3004)      │  │SERVICE       │  │SERVICE       │
-        │                 │  │(:3005)       │  │(:3006)       │
-        │ • Charge pay    │  │              │  │              │
-        │ • Webhook       │  │ • Email      │  │ • Reviews    │
-        │ • Idempotency   │  │ • Push (WIP) │  │ • Ratings    │
-        │                 │  │ • Events     │  │ • Purchase   │
-        └─────────────────┘  └──────────────┘  │   verify     │
-                                                 └──────────────┘
-                    ┌────────────────┐
-                    │                ▼
-                    │  ┌──────────────────────┐
-                    │  │ PROMOTION SERVICE    │
-                    │  │ (:3007)              │
-                    │  │                      │
-                    │  │ • Vouchers           │
-                    │  │ • Discounts          │
-                    │  │ • Lock mechanisms    │
-                    │  └──────────────────────┘
-                    │
-                    ▼
-    ┌────────────────────────────────────────────────────────┐
-    │         INFRASTRUCTURE (Docker Compose)                │
-    ├────────────────────────────────────────────────────────┤
-    │                                                        │
-    │  ┌──────────────┐  ┌──────────┐  ┌──────────────┐    │
-    │  │ PostgreSQL   │  │  Redis   │  │   MinIO      │    │
-    │  │ (:5432)      │  │ (:6379)  │  │ (:9000/9001) │    │
-    │  │              │  │          │  │              │    │
-    │  │ • All data   │  │ • Cache  │  │ • Images     │    │
-    │  │ • Outbox     │  │ • Tokens │  │ • Avatars    │    │
-    │  │ • Migrations │  │ • Cart   │  │ • S3 API     │    │
-    │  │              │  │ • Sessions│  │              │    │
-    │  └──────────────┘  └──────────┘  └──────────────┘    │
-    │                                                        │
-    │  ┌──────────────┐  ┌──────────┐  ┌──────────────┐    │
-    │  │  Jaeger      │  │Prometheus│  │  Grafana     │    │
-    │  │ (:16686)     │  │ (:9090)  │  │ (:3100→3000) │    │
-    │  │              │  │          │  │              │    │
-    │  │ • Tracing    │  │ • Metrics│  │ • Dashboards │    │
-    │  │ • OTLP       │  │ • Per-svc│  │ • Alerts     │    │
-    │  │              │  │   port   │  │              │    │
-    │  └──────────────┘  └──────────┘  └──────────────┘    │
-    │                                                        │
-    └────────────────────────────────────────────────────────┘
+                                     │ TCP (RPC đồng bộ, point-to-point)
+   ┌──────────┬──────────┬───────────┼────────────┬────────────┬────────────┬───────────┐
+   ▼          ▼          ▼           ▼            ▼            ▼            ▼           ▼
+┌───────┐ ┌────────┐ ┌─────────┐ ┌─────────┐ ┌───────────┐ ┌─────────┐ ┌──────────┐ ┌─────────┐
+│ USER  │ │PRODUCT │ │ ORDERS  │ │ PAYMENT │ │ INVENTORY │ │SHIPPING │ │PROMOTION │ │ REVIEW  │
+│ :3001 │ │ :3003  │ │ :3002   │ │ :3004   │ │ :3008     │ │ :3009   │ │ :3007    │ │ :3006   │
+│ Auth  │ │Catalog │ │Cart     │ │Intent   │ │stock_items│ │Shipment │ │Voucher   │ │Reviews  │
+│Roles  │ │(không  │ │State    │ │Webhook  │ │reservation│ │Carrier  │ │Redemption│ │         │
+│Address│ │ tồn kho│ │machine  │ │Refund   │ │expiry job │ │(sim)    │ │          │ │         │
+│       │ │        │ │Scheduler│ │Simulator│ │           │ │Webhook  │ │          │ │         │
+└───────┘ └────────┘ └────┬────┘ └────┬────┘ └─────┬─────┘ └────┬────┘ └────┬─────┘ └─────────┘
+                          │  ┌───────┴────────────┴────────────┴───────────┘
+                          ▼  ▼   Outbox → relay at-least-once → Inbox (chung bảng outbox / processed_messages)
+        ┌──────────────────────────────────────────────────────────────────────────┐
+        │  KAFKA (KRaft, :9092)  key = orderId                                      │
+        │  order-events · payment-events · payment-commands · inventory-commands · │
+        │  inventory-events · shipping-commands · shipping-events  (+ <topic>.dlq) │
+        └───────────────────────────────┬──────────────────────────────────────────┘
+                                        ▼
+                         ┌──────────────────────────┐
+                         │ NOTIFICATION (:3005)     │  consume order-events → email
+                         └──────────────────────────┘
+
+    ┌────────────────────────────────────────────────────────────────────────┐
+    │  INFRASTRUCTURE (Docker Compose)                                       │
+    │  PostgreSQL :5432 (1 DB, 1 bộ migration) · Redis :6379 (cart, session, │
+    │  throttle, idempotency) · Kafka :9092 · MinIO :9000/9001               │
+    │  Jaeger :16686 · Prometheus :9090 · Grafana :3100                      │
+    └────────────────────────────────────────────────────────────────────────┘
 ```
+
+Mỗi service ghi/đọc bảng của mình trên cùng một database; tham chiếu giữa domain bằng UUID (không FK chéo service). Orders, Payment, Inventory, Shipping, Promotion, Notification là app **hybrid** (TCP + Kafka); User, Product, Review, Gateway chỉ TCP/HTTP.
 
 ---
 
@@ -96,56 +61,45 @@ Tài liệu này mô tả kiến trúc tổng thể của hệ thống: các th�
 
 ### 1. Gateway ↔ Microservices (TCP)
 - **Transport**: NestJS `@nestjs/microservices` TCP transport
-- **Chiều giao tiếp**: request-response (`.send()`) hoặc fire-and-forget (`.emit()`)
+- **Chiều giao tiếp**: request-response (`.send()`)
 - **Xử lý lỗi**: RPC error được map sang HTTP status code qua `HttpExceptionFilter`
-- **Timeout**: 10 giây/call qua `TcpResilienceService` (const `TIMEOUT_MS` trong `apps/gateway/src/common/tcp-resilience.service.ts`). Ngoại lệ: `JwtAuthGuard` gọi `VERIFY_TOKEN` trực tiếp (không qua service này) với timeout riêng 5 giây
+- **Timeout**: 10 giây/call qua `TcpResilienceService` (`DEFAULT_TCP_TIMEOUT_MS`, tham số `timeoutMs` tuỳ chọn; catalog ghép tồn kho dùng 1500ms). Ngoại lệ: `JwtAuthGuard` gọi `VERIFY_TOKEN` trực tiếp (không qua service này) với timeout riêng 5 giây
 - **Resilience**: Circuit breaker bằng Opossum (50% error threshold mở breaker, 15s half-open reset). Opossum's `timeout` option bị tắt — timeout thực tế do RxJS `timeout()` operator bên ngoài xử lý
 
 ```typescript
-// Gateway gọi Order Service (request-response) — dùng object { cmd } + firstValueFrom
-const order = await firstValueFrom(
-  this.orderClient.send({ cmd: ORDER_MESSAGE_PATTERN.CREATE_ORDER }, createOrderDto),
-);
-
-// Orders (OutboxWorker) emit event (fire-and-forget, không có ack) tới từng subscriber
-subscriber.emit('order.created', { orderId, userId, totalAmount });
+// Gateway chuyển checkout sang Orders (request-response) — userId lấy từ token
+this.tcpResilience.send(NAME_SERVICE_TCP.ORDER_SERVICE, this.orderClient,
+  { cmd: ORDER_MESSAGE_PATTERN.CHECKOUT }, { userId, dto });
 ```
 
-### 2. Inter-Service Communication (giao tiếp giữa các microservice)
-- **Loại**: Point-to-point TCP, **không dùng message broker** (RabbitMQ đã bị loại bỏ hoàn toàn)
-- **Pattern**: Service này gọi trực tiếp service kia qua TCP
-  - Ví dụ: Orders gọi Product để trừ/hoàn stock
-  - Ví dụ: Review gọi Orders để verify đã mua hàng
-- **Không có Event Bus dùng chung**: các service giao tiếp qua TCP `.send()`/`.emit()` thô, không qua CQRS EventBus (EventBus của `@nestjs/cqrs` chỉ dùng nội bộ trong 1 service)
+### 2. Inter-Service Communication (giữa các microservice)
+Hai kênh, chọn theo bản chất:
 
-```typescript
-// Order service gọi Product service để trừ stock (delta âm) hoặc hoàn stock (delta dương)
-// Chỉ có 1 message pattern ADJUST_STOCK — không có RPC riêng cho "reserve"/"release"
-const result = await firstValueFrom(
-  this.productClient.send(
-    { cmd: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK },
-    { productId, delta: -quantity },
-  ),
-);
-```
+| Kênh | Dùng cho | Ví dụ |
+|---|---|---|
+| **TCP** `{cmd}` (đồng bộ, timeout 10s) | Cần trả lời ngay để quyết định bước kế tiếp | Orders → `Inventory.RESERVE` / `CHECK_RESERVATION`; Orders → `Payment.CREATE_INTENT`; Orders → `Promotion.VALIDATE/RESERVE_VOUCHER`; Orders → `Product.GET_PRODUCT`; Review → `Orders.GET_ORDER`; Notification → `User.GET_USER_INFO` |
+| **Kafka** (bất đồng bộ, at-least-once) | Event/command điều phối sau điểm quyết định, cần chịu được consumer down | `OrderPaid`, `CommitInventory`, `CreateShipment`, `PaymentSucceeded`, `ShipmentDelivered`, `RefundPayment`... |
 
-### 3. Event Listener mẫu (Notification lắng nghe sự kiện Order)
+- Event/command Kafka **luôn** đi qua Outbox (`OutboxWriter.append(manager, ...)` cùng transaction với đổi state, key = `orderId`), không `emit` trực tiếp, không qua `EventBus` của `@nestjs/cqrs` (chỉ dùng nội bộ một service).
+- Envelope chuẩn `{eventId, type, orderId, occurredAt, version, payload}`; command và event cùng envelope, phân biệt bằng `type` + topic.
+- Consumer: `KafkaConsumerRunner` — 1 transaction gồm ghi Inbox (`processed_messages`, khử trùng theo `(consumer, eventId)`) + đổi state + ghi Outbox; lỗi → retry tối đa 3 lần → `<topic>.dlq` → service phát event thất bại tương ứng.
+- Hybrid app bắt buộc gắn `Transport.TCP`/`Transport.KAFKA` cho từng `@MessagePattern`/`@EventPattern`.
+
+### 3. Event Listener mẫu (Notification lắng nghe `order-events`)
 
 ```typescript
 // apps/notification/src/order-events.controller.ts
 @Controller()
 export class OrderEventsController {
-  @EventPattern('order.created')
-  async onOrderCreated(@Payload() payload: { orderId: string; userId: string; totalAmount: number }) {
-    // GET_USER_INFO(userId) → email (lỗi: fallback userId) → EmailProvider.send → ghi sent_notifications
-    await this.notifyUser(payload.userId, `Đơn hàng ${payload.orderId} đã được tạo`, '...', 'order.created');
+  @EventPattern(KAFKA_TOPIC.ORDER_EVENTS, Transport.KAFKA)
+  async onOrderEvent(@Payload() message: unknown) {
+    // KafkaConsumerRunner: inbox + transaction + retry 3 + DLQ;
+    // OrderCreated/OrderStatusChanged → User.GET_USER_INFO → EmailProvider.send → ghi sent_notifications
   }
 }
 ```
 
-> Giao hàng event là **at-most-once** (TCP `emit` không ack, Outbox đánh dấu `PUBLISHED` ngay sau khi emit) — xem [design-trade-offs.md §2.4](./design-trade-offs.md#24-transactional-outbox--polling-mỗi-giây).
-
-Chi tiết pattern Transactional Outbox (đảm bảo event không bị mất) → xem [system-architecture-orders-flow.md](./system-architecture-orders-flow.md).
+> Giao event là **at-least-once** (outbox chỉ `PUBLISHED` sau khi broker ack); consumer idempotent nhờ Inbox. Chi tiết: [system-architecture-orders-flow.md](./system-architecture-orders-flow.md), [design-trade-offs.md §2.4](./design-trade-offs.md#24-transactional-outbox--inbox-qua-kafka-at-least-once).
 
 ---
 
@@ -153,11 +107,12 @@ Chi tiết pattern Transactional Outbox (đảm bảo event không bị mất) �
 
 | Pattern | Dùng ở đâu | Mục đích | Chi tiết |
 |---|---|---|---|
-| Checkout Saga | Orders service | Điều phối trừ kho → tạo order (PENDING) → charge payment → PROCESSING + outbox, có compensation khi payment fail/timeout | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
-| Transactional Outbox | Orders service | Đảm bảo event không mất khi service crash giữa chừng | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
-| Optimistic Locking | Product (`@VersionColumn`) | Tránh race condition khi nhiều request cùng trừ stock | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
-| Pessimistic Locking | Promotion (voucher, `SELECT … FOR UPDATE`) | Tránh 1 voucher bị dùng vượt `usageLimit` khi có concurrent request | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
-| CQRS | Orders, Product, Payment, Review, Promotion | Tách rõ write (Command) và read (Query) | [code-standards.md](./code-standards.md#cqrs-structure) |
+| Orchestration (state machine + event/command) | Orders | Điều phối checkout → thanh toán → kho → vận chuyển → giao; Orders là bên duy nhất đổi trạng thái đơn | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md), [target-checkout-architecture.md](./target-checkout-architecture.md) |
+| Transactional Outbox + Inbox (Kafka, at-least-once) | Orders, Payment, Inventory, Shipping | Event không mất khi crash/broker down; consumer khử trùng theo `eventId` | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
+| Optimistic Locking | Orders (`version`, `UPDATE ... WHERE version`) | Giải race giữa huỷ / event thanh toán / event giao hàng / scheduler | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
+| Reserve → commit/release | Inventory (`stock_items`, `reservations`) | Giữ hàng có TTL, chống oversell, tự thu hồi khi hết hạn | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
+| Pessimistic Locking | Promotion (voucher, `FOR UPDATE`), Inventory (`ORDER BY id FOR UPDATE`), Shipping (`CancelShipment`) | Tránh vượt `usageLimit`, deadlock khi reserve, đua huỷ/giao | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) |
+| CQRS | Orders, Product, Payment, Review, Promotion, Inventory, Shipping | Tách rõ write (Command) và read (Query); consumer Kafka → `CommandBus` | [code-standards.md](./code-standards.md#cqrs-structure) |
 | JWT Auth + Redis session | Gateway + User service | Xác thực stateless nhưng có thể revoke qua Redis | [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) |
 | Gateway middleware chain | Gateway | Helmet → CORS → tracking (middleware) → **Guards (Jwt/Permission/Throttler) → Interceptors (Idempotency) → Pipes (Validation)** → Controller | [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) |
 
@@ -182,7 +137,9 @@ Mỗi service trong main.ts gọi setupTracing():
 ```
 Mỗi service expose /metrics (PrometheusExporter của OpenTelemetry) trên cổng riêng:
 gateway 9464 · user 9465 · product 9466 · orders 9467 · payment 9468
-notification 9469 · review 9470 · promotion 9471   (khớp prometheus.yml)
+notification 9469 · review 9470 · promotion 9471 · inventory 9472 · shipping 9473
+(prometheus.yml hiện chỉ có target cho 8 service đầu; inventory/shipping chưa được thêm.)
+Counter `outbox_failed_total{source}` đếm outbox row chuyển `FAILED`.
 
 Metrics do auto-instrumentation + host-metrics sinh ra (HTTP, DB, Redis, process.*, system.*);
 tên metric cụ thể phụ thuộc phiên bản @opentelemetry — kiểm tra tại /metrics thay vì dựa vào danh sách cố định.
@@ -230,9 +187,12 @@ Dùng bởi:
 ## External Integrations & Planned Features
 
 ### Payment Provider
-- **Hiện tại**: `SimulatedPaymentProvider` (luôn thành công, bind cứng bằng `useClass` trong `PaymentModule`)
-- **Kế hoạch**: vnpay/momo — cần đổi binding sang `useFactory` theo env; interface `PaymentProvider` (`charge`, `verifyWebhook`) đã sẵn
-- **Trạng thái**: flow simulate chạy end-to-end, tích hợp provider thật chưa làm
+- **Hiện tại**: `SimulatedPaymentProvider` (token DI `PAYMENT_PROVIDER`, `useFactory`): `createIntent` trả `checkoutUrl` về `/simulator/pay/:intentId`, `refund` luôn thành công, webhook ký HMAC thật bằng `PAYMENT_WEBHOOK_SECRET`. Không gọi dịch vụ ngoài.
+- **Kế hoạch**: vnpay/momo — implement `PaymentProvider` (`createIntent`, `refund`, `signWebhook`, `verifyWebhook`) và chọn provider theo env; ký trên raw body.
+- **Trạng thái**: flow simulate hoạt động ở mức code + unit test; chưa chạy e2e trên stack thật.
+
+### Shipping Carrier
+- **Hiện tại**: `SimulatedShippingProvider` (token `SHIPPING_PROVIDER`): trả mã vận đơn ngẫu nhiên, giao hàng do timer (`SHIPPING_SIM_DELIVER_DELAY_MS`), admin (`POST /shipments/:orderId/deliver`) hoặc webhook HMAC (`SHIPPING_WEBHOOK_SECRET`) kích hoạt; `SHIPPING_SIM_MODE=fail` để thử retry/DLQ.
 
 ### Email Notifications
 - **Hiện tại**: `SimulatedEmailProvider` (chỉ log)
@@ -311,7 +271,7 @@ readinessProbe:
 
 | Package | Trạng thái | Lý do |
 |---------|--------|--------|
-| amqp-connection-manager | Dead code | RabbitMQ đã bị loại bỏ hoàn toàn, thay bằng TCP |
+| amqp-connection-manager | Dead code | RabbitMQ đã bị loại bỏ hoàn toàn (kênh bất đồng bộ nay là Kafka qua `kafkajs`) |
 | amqplib | Dead code | RabbitMQ đã bị loại bỏ hoàn toàn |
 
 ### Code cũ/trùng lặp
@@ -337,9 +297,10 @@ readinessProbe:
 ## Tài liệu liên quan
 
 - [business-flows.md](./business-flows.md) — Luồng nghiệp vụ end-to-end, state machine đơn hàng, business rules
-- [module-processing-flows.md](./module-processing-flows.md) — Xử lý chi tiết từng module (Gateway, User, Product, Orders, Payment, Notification, Review, Promotion)
+- [module-processing-flows.md](./module-processing-flows.md) — Xử lý chi tiết từng module (Gateway, User, Product, Orders, Payment, Notification, Review, Promotion, Inventory, Shipping) và cơ chế Kafka
 - [design-trade-offs.md](./design-trade-offs.md) — Quyết định thiết kế, trade-off, rủi ro đã xác minh
-- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Checkout Saga, Transactional Outbox, Optimistic/Pessimistic Locking, ví dụ flow checkout đầy đủ
+- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Orchestration checkout v2, Outbox/Inbox Kafka, Optimistic/Pessimistic Locking, ví dụ flow đầy đủ
+- [target-checkout-architecture.md](./target-checkout-architecture.md) — Thiết kế đã chốt + trạng thái triển khai (§10)
 - [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) — Login, verify token, refresh token, logout
 - [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) — Middleware chain của Gateway, request/response envelope
 - [code-standards.md](./code-standards.md) — Quy ước code, CQRS structure

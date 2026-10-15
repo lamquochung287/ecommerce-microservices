@@ -178,7 +178,7 @@ export class CreateOrderCommand {
   ) {}
 }
 
-// ✅ ĐÚNG Handler
+// ✅ ĐÚNG Handler (ví dụ minh hoạ; handler thật: apps/orders/src/commands/handlers/checkout.handler.ts)
 @CommandHandler(CreateOrderCommand)
 export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
   async execute(command: CreateOrderCommand): Promise<Order> {
@@ -586,15 +586,18 @@ await this.orderRepository.save(order); // Success
 await this.eventEmitter.emit('order.created', order); // Fails → event lost!
 ```
 
-**Fix**: Transactional Outbox (đúng theo style thật dùng trong `CreateOrderHandler` — `dataSource.transaction()`, không phải `queryRunner` thủ công):
+**Fix**: Transactional Outbox (style thật trong `apps/orders` — `dataSource.transaction()` + `OutboxWriter` của `@lib/messaging`, đổi trạng thái qua `OrderTransitionService`):
 ```ts
 await this.dataSource.transaction(async (manager) => {
-  await manager.save(order);
-  await manager.save(
-    manager.create(Outbox, { eventType: ORDER_EVENT_TYPE.ORDER_CREATED, payload: order }),
-  );
+  await manager.insert(Order, order);
+  await this.outbox.append(manager, {
+    topic: KAFKA_TOPIC.ORDER_EVENTS,
+    type: MESSAGE_TYPE.ORDER_CREATED,
+    orderId: order.id, // partition key
+    payload: { userId: order.userId, totalAmount: order.totalAmount, expiresAt },
+  });
 });
-// Rollback tự động nếu callback throw. Sau đó: OutboxWorker polls & fans out event via TCP
+// Rollback tự động nếu callback throw. Sau đó OutboxRelayService đẩy Kafka (at-least-once); consumer dùng KafkaConsumerRunner (Inbox)
 ```
 
 ### ❌ Anti-Pattern: Race Condition on Stock

@@ -143,5 +143,5 @@ Tài liệu con của [system-architecture.md](./system-architecture.md). Mô t�
 
 - [system-architecture.md](./system-architecture.md) — Tổng quan kiến trúc
 - [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) — Middleware chain của Gateway (bao gồm JwtAuthGuard, PermissionGuard trong pipeline)
-- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Checkout Saga, Outbox Pattern
+- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Orchestration checkout v2, Outbox/Inbox
 - [code-standards.md](./code-standards.md) — Quy ước bảo mật (bcrypt, JWT, HMAC, idempotency)

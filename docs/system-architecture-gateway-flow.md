@@ -136,5 +136,5 @@ Toàn bộ logic nghiệp vụ (tính giá, kiểm tra tồn kho, xử lý thanh
 
 - [system-architecture.md](./system-architecture.md) — Tổng quan kiến trúc
 - [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) — Chi tiết JWT login/verify/refresh/logout
-- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Checkout Saga, Outbox Pattern
+- [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Orchestration checkout v2, Outbox/Inbox
 - [code-standards.md](./code-standards.md) — Quy ước validation, error handling, security

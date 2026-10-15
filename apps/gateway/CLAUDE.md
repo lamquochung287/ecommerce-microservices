@@ -27,7 +27,8 @@ Envelope: `{success, data, error, message, meta{statusCode,timestamp,path,method
 - `POST /products/:id/stock-adjustments` → `INVENTORY.ADJUST_STOCK` (không còn qua Product).
 
 ## Gotchas / gap đã biết (đừng lặp lại, ưu tiên sửa nếu được giao)
-- `POST /orders` nhận `userId`+`unitPrice` từ client (route cũ, xoá ở bước cutover; `/cart/checkout` mới lấy giá server-side ở Orders). `GET /orders*`, `/refunds` không kiểm tra chủ sở hữu (khác với `/orders/:id/pay|cancel|return` đã có kiểm tra).
+- Các route cũ `POST /orders` (tin `userId`/`unitPrice` từ client), `PATCH /orders/:id/status`, `POST /refunds`, `/refunds/:id/approve|reject` **đã bị xoá**; còn `GET /orders`, `GET /orders/:id`, `GET /orders/:id/refunds` (`ORDER/READ`) **không kiểm tra chủ sở hữu** (khác với `/orders/:id/pay|cancel|return` đã có kiểm tra). `/vouchers/apply` giữ nguyên (tiêu lượt không gắn đơn).
+- `src/gateway.controller.spec.ts` là boilerplate có sẵn, đang fail (thiếu provider `USER_SERVICE`).
 - Address `PUT/DELETE/POST :id/default` không kiểm tra chủ sở hữu. `/cart/*`, `/addresses/*` chỉ có `JwtAuthGuard` (không PermissionGuard).
 - `POST /user/logout` không guard, tin `userId/sessionId` trong body. `UserService.getProfile` là stub rỗng.
 - `/health` chỉ kiểm tra Redis + user/product/order.
