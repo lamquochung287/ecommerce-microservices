@@ -10,6 +10,12 @@
 //   TARGET_VUS  mặc định 500
 //   RAMP        thời gian tăng tải, mặc định 5m
 //   HOLD        thời gian giữ tải đỉnh, mặc định 5m
+//   PAY_RATIO     tỉ lệ đơn checkout được thanh toán qua simulator, mặc định 0.7 (phần còn lại bỏ dở, tự hết hạn)
+//   CANCEL_RATIO  tỉ lệ đơn (sau bước thanh toán) bị user huỷ, mặc định 0.1
+//
+// Luồng checkout đầy đủ: checkout -> GET /orders/:id/pay (chốt còn hàng) -> POST /simulator/pay/:intentId/success
+// -> (tuỳ chọn) POST /orders/:id/cancel. Cần Payment ở PAYMENT_SIM_MODE=manual và NODE_ENV != production
+// (compose loadtest đã đặt sẵn); nếu simulator bị tắt thì bước thanh toán trả 404 và được ghi vào lt_pay_unavailable.
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { SharedArray } from 'k6/data';
@@ -21,6 +27,8 @@ const PROFILE = __ENV.PROFILE || 'mixed';
 const TARGET_VUS = Number(__ENV.TARGET_VUS || 500);
 const RAMP = __ENV.RAMP || '5m';
 const HOLD = __ENV.HOLD || '5m';
+const PAY_RATIO = Number(__ENV.PAY_RATIO ?? 0.7);
+const CANCEL_RATIO = Number(__ENV.CANCEL_RATIO ?? 0.1);
 
 // Access token sống 15 phút và gateway chưa có endpoint refresh, nên login lại trước hạn.
 const TOKEN_MAX_AGE_MS = 14 * 60 * 1000;
@@ -59,6 +67,12 @@ const checkoutDuration = new Trend('lt_checkout_duration', true);
 const serverErrors = new Rate('lt_server_errors'); // 5xx, timeout, 429
 const checkoutRejected = new Counter('lt_checkout_rejected'); // hết hàng... (lỗi nghiệp vụ, không tính là lỗi server)
 const checkoutOk = new Counter('lt_checkout_ok');
+const payLinkDuration = new Trend('lt_pay_link_duration', true);
+const payDuration = new Trend('lt_pay_duration', true);
+const cancelDuration = new Trend('lt_cancel_duration', true);
+const orderPaid = new Counter('lt_order_paid'); // simulator ghi nhận thanh toán thành công
+const orderCancelled = new Counter('lt_order_cancelled');
+const payUnavailable = new Counter('lt_pay_unavailable'); // simulator bị tắt (404): kiểm NODE_ENV / PAYMENT_SIM_MODE
 
 export const options = {
 	scenarios: {
@@ -80,6 +94,9 @@ export const options = {
 		lt_browse_duration: ['p(95)<500'],
 		lt_cart_duration: ['p(95)<800'],
 		lt_checkout_duration: ['p(95)<2000'],
+		lt_pay_link_duration: ['p(95)<1000'],
+		lt_pay_duration: ['p(95)<2000'],
+		lt_cancel_duration: ['p(95)<2000'],
 	},
 	summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
@@ -189,8 +206,9 @@ function cart(ids, jwt) {
 }
 
 // Checkout v2: chỉ gửi định danh món được chọn (số lượng lấy từ giỏ, giá lấy từ Product) và địa chỉ.
-// Kết quả mong đợi là 201 PENDING_PAYMENT kèm payment_url; k6 không thanh toán nên đơn tự hết hạn sau
-// ORDER_PAYMENT_TTL_SECONDS và hàng được trả lại, cùng sản phẩm thì lần checkout sau thay thế đơn cũ.
+// Kết quả mong đợi là 201 PENDING_PAYMENT kèm payment_url. Sau đó một phần đơn (PAY_RATIO) được thanh toán qua
+// simulator để chạy tiếp pha bất đồng bộ qua Kafka (PAID -> FULFILLING -> SHIPPED); phần còn lại bỏ dở và tự hết
+// hạn sau ORDER_PAYMENT_TTL_SECONDS, hàng được trả lại. Cùng sản phẩm thì lần checkout sau thay thế đơn cũ.
 function checkout(ids, jwt) {
 	const productId = pick(ids);
 	track(
@@ -221,8 +239,60 @@ function checkout(ids, jwt) {
 	);
 	checkoutDuration.add(res.timings.duration);
 	serverErrors.add(isServerError(res.status));
-	if (res.status >= 200 && res.status < 300) checkoutOk.add(1);
-	else if (CHECKOUT_REJECTED.includes(res.status)) checkoutRejected.add(1);
+	if (CHECKOUT_REJECTED.includes(res.status)) {
+		checkoutRejected.add(1);
+		return;
+	}
+	if (res.status < 200 || res.status >= 300) return;
+	checkoutOk.add(1);
+
+	const orderId = res.json('data.orderId');
+	if (orderId) payAndMaybeCancel(orderId, jwt);
+}
+
+// Nghiệp vụ bị từ chối (đơn đã hết hạn hoặc đổi trạng thái) không phải lỗi server nên không tính vào lt_server_errors.
+const PAY_REJECTED = [400, 404, 409];
+
+function payAndMaybeCancel(orderId, jwt) {
+	if (Math.random() >= PAY_RATIO) return; // bỏ dở: đơn tự hết hạn và trả kho
+
+	// Chốt kiểm tra còn hàng trước khi cho thanh toán; trả về paymentUrl trỏ tới simulator.
+	const linkRes = http.get(`${BASE_URL}/orders/${orderId}/pay`, {
+		headers: headers(jwt),
+		tags: { name: 'GET /orders/:id/pay' },
+		responseCallback: http.expectedStatuses({ min: 200, max: 299 }, ...PAY_REJECTED),
+	});
+	payLinkDuration.add(linkRes.timings.duration);
+	serverErrors.add(isServerError(linkRes.status));
+	if (linkRes.status < 200 || linkRes.status >= 300) return;
+
+	// paymentUrl dùng host công khai (PUBLIC_API_BASE_URL) có thể không với tới được từ container k6: chỉ lấy intentId.
+	const match = /simulator\/pay\/([0-9a-fA-F-]{36})/.exec(linkRes.json('data.paymentUrl') || '');
+	if (!match) return;
+
+	sleep(0.5 + Math.random());
+	const payRes = http.post(`${BASE_URL}/simulator/pay/${match[1]}/success`, null, {
+		headers: { 'x-api-key': API_KEY },
+		tags: { name: 'POST /simulator/pay/:intentId/success' },
+		responseCallback: http.expectedStatuses({ min: 200, max: 299 }, ...PAY_REJECTED),
+	});
+	payDuration.add(payRes.timings.duration);
+	serverErrors.add(isServerError(payRes.status));
+	if (payRes.status === 404) payUnavailable.add(1);
+	if (payRes.status < 200 || payRes.status >= 300) return;
+	orderPaid.add(1);
+
+	if (Math.random() >= CANCEL_RATIO) return;
+	sleep(1 + Math.random());
+	const cancelRes = http.post(`${BASE_URL}/orders/${orderId}/cancel`, null, {
+		headers: headers(jwt),
+		tags: { name: 'POST /orders/:id/cancel' },
+		// 409 = đơn đã chuyển SHIPPED trước khi huỷ kịp (đua hợp lệ); 400/404 = trạng thái không cho huỷ.
+		responseCallback: http.expectedStatuses({ min: 200, max: 299 }, ...PAY_REJECTED),
+	});
+	cancelDuration.add(cancelRes.timings.duration);
+	serverErrors.add(isServerError(cancelRes.status));
+	if (cancelRes.status >= 200 && cancelRes.status < 300) orderCancelled.add(1);
 }
 
 export default function (data) {

@@ -64,8 +64,18 @@ services:
       KAFKA_BROKERS: kafka:29092
       PAYMENT_WEBHOOK_SECRET: loadtest-payment-webhook-secret
       SHIPPING_WEBHOOK_SECRET: loadtest-shipping-webhook-secret
-      # Tự thanh toán thành công sau PAYMENT_SIM_DELAY_MS để đo toàn luồng PAID -> FULFILLING -> SHIPPED.
-      PAYMENT_SIM_MODE: auto-success
+      # Image chạy NODE_ENV=production nhưng khi đó simulator (trang /simulator/pay, auto-simulator của Payment,
+      # timer giao hàng của Shipping) bị tắt hẳn và không đơn nào được thanh toán. Đặt development để bật simulator;
+      # NODE_ENV chỉ được các simulator này đọc nên không đổi hành vi nào khác.
+      NODE_ENV: development
+      # manual: k6 tự thanh toán qua /simulator/pay (profile checkout/mixed, tỉ lệ PAY_RATIO).
+      # auto-success|auto-fail: Payment tự gọi webhook sau PAYMENT_SIM_DELAY_MS, k6 không cần thanh toán.
+      PAYMENT_SIM_MODE: ${LT_PAYMENT_SIM_MODE:-manual}
+      PAYMENT_SIM_DELAY_MS: ${LT_PAYMENT_SIM_DELAY_MS:-3000}
+      # Tự "đã giao" sau ngần này ms kể từ khi có vận đơn để đo tới DELIVERED; 0 = không tự giao.
+      SHIPPING_SIM_DELIVER_DELAY_MS: ${LT_SHIPPING_DELIVER_DELAY_MS:-5000}
+      # Thời gian giữ hàng + hạn thanh toán (giây). Đặt ngắn để đo luôn nhánh hết hạn và trả kho.
+      ORDER_PAYMENT_TTL_SECONDS: ${LT_ORDER_PAYMENT_TTL_SECONDS:-900}
       # Các service gọi nhau qua 'localhost' (hardcode); trong container nó phân giải ra ::1 trước nên TCP bị từ chối.
       NODE_OPTIONS: --dns-result-order=ipv4first
       # Mặc định 50/service × 10 service vượt xa max_connections=100 của Postgres.
@@ -102,6 +112,8 @@ services:
       TARGET_VUS: ${TARGET_VUS:-500}
       RAMP: ${RAMP:-5m}
       HOLD: ${HOLD:-5m}
+      PAY_RATIO: ${PAY_RATIO:-0.7}
+      CANCEL_RATIO: ${CANCEL_RATIO:-0.1}
       K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
       K6_PROMETHEUS_RW_TREND_STATS: avg,p(95),p(99),max
     command: run -o experimental-prometheus-rw loadtest/k6/load-test.js

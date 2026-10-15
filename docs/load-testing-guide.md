@@ -12,7 +12,7 @@ Mục tiêu: 500 user đồng thời trên VPS **2 vCPU / 4 GB**. Stack chạy t
 | `loadtest/collect-docker-stats.sh` | Ghi CPU/RAM từng container ra CSV |
 | `grafana/dashboards/k6-load-test.json` | Dashboard k6 (VUs, RPS, lỗi, p95) |
 
-Container `apps` cần Kafka (service `kafka` của `docker-compose.yml`, `KAFKA_BROKERS=kafka:29092`) cùng `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` (đã đặt trong `docker-compose.loadtest.yml`) và `PAYMENT_SIM_MODE=auto-success` để đơn tự đi tiếp sau checkout.
+Container `apps` cần Kafka (service `kafka` của `docker-compose.yml`, `KAFKA_BROKERS=kafka:29092`) cùng `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` (đã đặt trong `docker-compose.loadtest.yml`). Image chạy `NODE_ENV=production` làm simulator bị tắt (không đơn nào thanh toán được), nên compose loadtest đặt `NODE_ENV=development`; biến này chỉ được các simulator đọc. `PAYMENT_SIM_MODE` mặc định `manual` (k6 tự thanh toán qua `/simulator/pay`), đổi bằng `LT_PAYMENT_SIM_MODE=auto-success` nếu muốn Payment tự thanh toán sau `LT_PAYMENT_SIM_DELAY_MS`. Shipping tự "đã giao" sau `LT_SHIPPING_DELIVER_DELAY_MS` (mặc định 5000ms, `0` = tắt), hạn thanh toán/giữ hàng đặt bằng `LT_ORDER_PAYMENT_TTL_SECONDS` (mặc định 900).
 
 Phân bổ quota (tổng 2 CPU / 4 GB, đổi bằng biến `LT_*`): apps 0.8 CPU / 2.5 GB, postgres 1.0 CPU / 1 GB, redis 0.2 CPU / 0.5 GB. Prometheus, Grafana, Jaeger không tính vào quota (trên VPS thật nên chạy ở máy khác).
 
@@ -33,7 +33,7 @@ sh loadtest/collect-docker-stats.sh
 npm run loadtest:run
 ```
 
-Chỉnh tải bằng biến môi trường: `PROFILE=read|cart|checkout|auth|mixed`, `TARGET_VUS`, `RAMP`, `HOLD`. Thử ít user trước:
+Chỉnh tải bằng biến môi trường: `PROFILE=read|cart|checkout|auth|mixed`, `TARGET_VUS`, `RAMP`, `HOLD`; với checkout thêm `PAY_RATIO` (tỉ lệ đơn được thanh toán, mặc định 0.7) và `CANCEL_RATIO` (tỉ lệ đơn đã thanh toán bị huỷ, mặc định 0.1). Thử ít user trước:
 
 ```bash
 TARGET_VUS=50 RAMP=1m HOLD=1m npm run loadtest:run          # bash
@@ -60,7 +60,7 @@ SLO trong `thresholds` của kịch bản: lỗi server < 1% (5xx, timeout, 429)
 
 ## Hạn chế của số đo
 
-- Payment/Shipping là simulator (không có độ trễ cổng/carrier thật). Kịch bản `checkout` chỉ gọi `POST /cart/checkout` (body `{items:[{productId}], shippingAddress}`, header `x-idempotency-key` mới mỗi lần) rồi dừng ở `PENDING_PAYMENT`: số đo là phần đồng bộ (pricing + reserve + tạo đơn + intent), chưa gồm pha bất đồng bộ qua Kafka. Đơn không thanh toán tự hết hạn sau `ORDER_PAYMENT_TTL_SECONDS` (15') và trả kho.
+- Payment/Shipping là simulator (không có độ trễ cổng/carrier thật). Kịch bản `checkout` chạy: `POST /cart/checkout` (body `{items:[{productId}], shippingAddress}`, header `x-idempotency-key` mới mỗi lần) → với `PAY_RATIO` đơn: `GET /orders/:id/pay` (chốt còn hàng) → `POST /simulator/pay/:intentId/success` → với `CANCEL_RATIO` đơn: `POST /orders/:id/cancel`. Các đơn bỏ dở tự hết hạn sau `ORDER_PAYMENT_TTL_SECONDS` và trả kho; các đơn đã thanh toán đi tiếp pha bất đồng bộ qua Kafka (PAID → FULFILLING → SHIPPED → DELIVERED nhờ timer giao hàng). Metric thêm: `lt_pay_link_duration`, `lt_pay_duration`, `lt_cancel_duration`, `lt_order_paid`, `lt_order_cancelled`, `lt_pay_unavailable` (khác 0 nghĩa là simulator đang bị tắt: kiểm `NODE_ENV`/`PAYMENT_SIM_MODE`). k6 chưa poll trạng thái đơn nên thời gian tới `DELIVERED` chỉ quan sát được qua DB hoặc Grafana của các service, không có trong số đo k6. Chưa kiểm chứng kịch bản này trên stack thật.
 - Hầu hết đo qua Docker Desktop (WSL2): CPU mỗi core có thể khác VPS, nên xem kết quả là tương đối. Nên chạy lại một lần trên VPS thật trước khi chốt.
 - Trace OTLP gửi tới `localhost:4318` bên trong container `apps` (không có Jaeger ở đó), nên chi phí tracing không giống khi Jaeger chạy thật.
 - Checkout **giữ** kho (reserve, TTL 15'): `onHand` seed không giảm nhưng `reserved` tăng; sản phẩm hết hàng bị từ chối 409 (đếm ở `lt_checkout_rejected`, không tính là lỗi server). Checkout lặp trên cùng sản phẩm của cùng user thay thế đơn cũ (`replaces`). Seed lại DB giữa các lần chạy để so sánh công bằng.
