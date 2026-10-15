@@ -1,7 +1,7 @@
 # Dùng kèm file gốc:
 #   docker compose -f docker-compose.yml -f loadtest/docker-compose.loadtest.yml up -d --build
-# Giới hạn tài nguyên mô phỏng VPS 2 vCPU / 4 GB: apps 0.8 CPU + 2.5 GB, postgres 1.0 CPU + 1 GB,
-# redis 0.2 CPU + 0.5 GB (tổng 2 CPU / 4 GB). Observability (prometheus, grafana, jaeger) không tính vào quota.
+# Giới hạn tài nguyên: apps 0.8 CPU + 2.5 GB, postgres 1.0 CPU + 1 GB, redis 0.2 CPU + 0.5 GB, kafka 1.0 CPU + 2 GB
+# (tổng 3 CPU / 6 GB, tức máy ~3 vCPU / 6 GB chạy cả Kafka). Observability (prometheus, grafana, jaeger, exporter) không tính vào quota.
 # Đổi con số bằng biến môi trường LT_* để thử cấu hình khác.
 services:
   postgres:
@@ -11,6 +11,11 @@ services:
   redis:
     cpus: ${LT_REDIS_CPUS:-0.2}
     mem_limit: ${LT_REDIS_MEM:-512m}
+
+  # Kafka tính vào quota (JVM, KRaft 1 node). Heap mặc định của image là 1 GB nên 2 GB đủ chỗ cho heap + page cache.
+  kafka:
+    cpus: ${LT_KAFKA_CPUS:-1.0}
+    mem_limit: ${LT_KAFKA_MEM:-2g}
 
   # Bộ migration của dự án chỉ là các bản vá tăng dần (không có CREATE TABLE cho users/orders/products),
   # nên không dựng được DB trống. Với load test: tạo bảng từ entity (schema:sync) rồi đánh dấu mọi
