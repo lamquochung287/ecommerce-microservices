@@ -13,6 +13,8 @@ import { USER_TCP_CLIENT } from './user-client.constant';
 
 import { DatabaseModule } from '@lib/database';
 import { CommonConfigModule } from '@lib/common';
+import { MessagingModule } from '@lib/messaging';
+import { OUTBOX_SOURCE } from 'libs/constant/kafka.constant';
 import { HealthModule } from './health/health.module';
 
 @Module({
@@ -21,6 +23,11 @@ import { HealthModule } from './health/health.module';
 		DatabaseModule,
 		TypeOrmModule.forFeature([SentNotification]),
 		HealthModule,
+		// Notification chỉ consume (inbox + runner), không có outbox nên tắt relay.
+		MessagingModule.forService({
+			source: OUTBOX_SOURCE.NOTIFICATION,
+			relay: false,
+		}),
 		ClientsModule.register([
 			{
 				name: USER_TCP_CLIENT,

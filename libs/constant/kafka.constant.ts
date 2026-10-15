@@ -61,4 +61,5 @@ export const OUTBOX_SOURCE = {
 	INVENTORY: 'inventory',
 	PAYMENT: 'payment',
 	SHIPPING: 'shipping',
+	NOTIFICATION: 'notification',
 } as const;

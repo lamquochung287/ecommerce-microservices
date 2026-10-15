@@ -1,5 +1,5 @@
 import { Controller } from '@nestjs/common';
-import { MessagePattern, Payload } from '@nestjs/microservices';
+import { MessagePattern, Payload, Transport } from '@nestjs/microservices';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { NOTIFICATION_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
@@ -12,7 +12,10 @@ export class NotificationController {
 		private readonly sentNotificationRepository: Repository<SentNotification>,
 	) {}
 
-	@MessagePattern({ cmd: NOTIFICATION_MESSAGE_PATTERN.GET_SENT_NOTIFICATIONS })
+	@MessagePattern(
+		{ cmd: NOTIFICATION_MESSAGE_PATTERN.GET_SENT_NOTIFICATIONS },
+		Transport.TCP,
+	)
 	async getSentNotifications(@Payload() data?: { recipient?: string }) {
 		const where = data?.recipient ? { recipient: data.recipient } : {};
 		return this.sentNotificationRepository.find({

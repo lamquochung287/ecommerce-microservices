@@ -6,8 +6,8 @@ import { Inject, Logger } from '@nestjs/common';
 import { RpcException } from '@nestjs/microservices';
 import { Order, OrderStatus } from '../../entities/order.entity';
 import { OrderItem } from '../../entities/order-item.entity';
-import { Outbox } from '../../entities/outbox.entity';
-import { ORDER_EVENT_TYPE } from '../../events/order-event-type.constant';
+import { OutboxWriter } from '@lib/messaging';
+import { KAFKA_TOPIC, MESSAGE_TYPE } from 'libs/constant/kafka.constant';
 import { InventoryReservationService } from '../../saga/inventory-reservation.service';
 import {
 	PAYMENT_PROVIDER,
@@ -21,6 +21,7 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
 	constructor(
 		private readonly dataSource: DataSource,
 		private readonly configService: ConfigService,
+		private readonly outboxWriter: OutboxWriter,
 		private readonly inventoryReservation: InventoryReservationService,
 		@Inject(PAYMENT_PROVIDER) private readonly paymentProvider: PaymentProvider,
 	) {}
@@ -102,15 +103,12 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
 		return this.dataSource.transaction(async (manager) => {
 			await manager.update(Order, order.id, { status: OrderStatus.PROCESSING });
 
-			const outboxEvent = manager.create(Outbox, {
-				eventType: ORDER_EVENT_TYPE.ORDER_CREATED,
-				payload: {
-					orderId: order.id,
-					userId: order.userId,
-					totalAmount: order.totalAmount,
-				},
+			await this.outboxWriter.append(manager, {
+				topic: KAFKA_TOPIC.ORDER_EVENTS,
+				type: MESSAGE_TYPE.ORDER_CREATED,
+				orderId: order.id,
+				payload: { userId: order.userId, totalAmount: order.totalAmount },
 			});
-			await manager.save(outboxEvent);
 
 			return manager.findOne(Order, { where: { id: order.id } });
 		});

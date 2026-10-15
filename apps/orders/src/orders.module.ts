@@ -20,8 +20,9 @@ import { Refund } from './entities/refund.entity';
 import { DatabaseModule } from '@lib/database';
 import { CommonConfigModule } from '@lib/common';
 import { CachedModule } from '@lib/cached';
+import { MessagingModule } from '@lib/messaging';
+import { OUTBOX_SOURCE } from 'libs/constant/kafka.constant';
 import { HealthModule } from './health/health.module';
-import { OutboxModule } from './outbox/outbox.module';
 import { SagaModule } from './saga/saga.module';
 import { CartModule } from './cart/cart.module';
 
@@ -48,7 +49,7 @@ export const EventHandlers = [OrderCreatedHandler];
 		TypeOrmModule.forFeature([Order, OrderItem, Refund]),
 		CqrsModule,
 		HealthModule,
-		OutboxModule,
+		MessagingModule.forService({ source: OUTBOX_SOURCE.ORDERS }),
 		SagaModule,
 		CartModule,
 	],

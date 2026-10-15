@@ -6,7 +6,7 @@ import { CreateOrderHandler } from './create-order.handler';
 import { CreateOrderCommand } from '../create-order.command';
 import { Order, OrderStatus } from '../../entities/order.entity';
 import { OrderItem } from '../../entities/order-item.entity';
-import { Outbox } from '../../entities/outbox.entity';
+import { OutboxMessage, OutboxWriter } from '@lib/messaging';
 import { Refund } from '../../entities/refund.entity';
 import { CreateOrderDto } from '../../dto/order.dto';
 import {
@@ -22,7 +22,7 @@ const dataSource = new DataSource({
 	username: process.env.DB_USER || 'root',
 	password: process.env.DB_PASSWORD || 'password',
 	database: process.env.DB_NAME || 'ecommerce',
-	entities: [Order, OrderItem, Outbox, Refund],
+	entities: [Order, OrderItem, OutboxMessage, Refund],
 	synchronize: false,
 });
 
@@ -81,6 +81,7 @@ describe('CreateOrderHandler (saga)', () => {
 		const handler = new CreateOrderHandler(
 			dataSource,
 			fakeConfigService(),
+			new OutboxWriter({ source: 'orders' }),
 			inventory as InventoryReservationService,
 			paymentProvider,
 		);
@@ -120,6 +121,7 @@ describe('CreateOrderHandler (saga)', () => {
 		const handler = new CreateOrderHandler(
 			dataSource,
 			fakeConfigService(),
+			new OutboxWriter({ source: 'orders' }),
 			inventory as InventoryReservationService,
 			paymentProvider,
 		);
@@ -156,6 +158,7 @@ describe('CreateOrderHandler (saga)', () => {
 		const handler = new CreateOrderHandler(
 			dataSource,
 			fakeConfigService(),
+			new OutboxWriter({ source: 'orders' }),
 			inventory as InventoryReservationService,
 			paymentProvider,
 		);
@@ -166,12 +169,13 @@ describe('CreateOrderHandler (saga)', () => {
 		expect(result!.status).toBe(OrderStatus.PROCESSING);
 		expect(Number(result!.subtotal)).toBe(200);
 
-		const outboxEvents = await dataSource
-			.getRepository(Outbox)
-			.find({ where: { eventType: 'order.created' } });
-		const matching = outboxEvents.find(
-			(e) => (e.payload as any).orderId === result!.id,
-		);
-		expect(matching).toBeDefined();
+		const matching = await dataSource
+			.getRepository(OutboxMessage)
+			.findOne({ where: { key: result!.id, eventType: 'OrderCreated' } });
+		expect(matching).not.toBeNull();
+		expect(matching!.topic).toBe('order-events');
+		expect(matching!.source).toBe('orders');
+		expect(matching!.eventId).toEqual(expect.any(String));
+		expect(matching!.payload).toMatchObject({ userId: baseDto.userId });
 	});
 });

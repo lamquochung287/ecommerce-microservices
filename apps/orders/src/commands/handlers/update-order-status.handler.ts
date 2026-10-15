@@ -2,14 +2,17 @@ import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { UpdateOrderStatusCommand } from '../update-order-status.command';
 import { DataSource } from 'typeorm';
 import { Order } from '../../entities/order.entity';
-import { Outbox } from '../../entities/outbox.entity';
-import { ORDER_EVENT_TYPE } from '../../events/order-event-type.constant';
+import { OutboxWriter } from '@lib/messaging';
+import { KAFKA_TOPIC, MESSAGE_TYPE } from 'libs/constant/kafka.constant';
 import { RpcException } from '@nestjs/microservices';
 import { canTransition } from '../../order-status.constant';
 
 @CommandHandler(UpdateOrderStatusCommand)
 export class UpdateOrderStatusHandler implements ICommandHandler<UpdateOrderStatusCommand> {
-	constructor(private readonly dataSource: DataSource) {}
+	constructor(
+		private readonly dataSource: DataSource,
+		private readonly outboxWriter: OutboxWriter,
+	) {}
 
 	async execute(command: UpdateOrderStatusCommand) {
 		const { id, dto } = command;
@@ -30,16 +33,16 @@ export class UpdateOrderStatusHandler implements ICommandHandler<UpdateOrderStat
 			order.status = dto.status;
 			const savedOrder = await manager.save(order);
 
-			const outboxEvent = manager.create(Outbox, {
-				eventType: ORDER_EVENT_TYPE.ORDER_STATUS_UPDATED,
+			await this.outboxWriter.append(manager, {
+				topic: KAFKA_TOPIC.ORDER_EVENTS,
+				type: MESSAGE_TYPE.ORDER_STATUS_CHANGED,
+				orderId: savedOrder.id,
 				payload: {
-					orderId: savedOrder.id,
 					userId: savedOrder.userId,
 					previousStatus,
 					status: savedOrder.status,
 				},
 			});
-			await manager.save(outboxEvent);
 
 			return savedOrder;
 		});
