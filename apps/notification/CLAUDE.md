@@ -20,6 +20,6 @@ Chi tiết: [docs/business-flows.md §2.10](../../docs/business-flows.md), [docs
 
 ## Gotchas
 - At-least-once + inbox: event trùng không gửi lại; nhưng nếu commit lỗi sau khi provider đã gửi thì email có thể trùng (provider thật cần idempotency key).
-- Event trùng vẫn tốn một lần lookup User (làm trước runner). `fromBeginning:false`: khởi động Notification trước khi Orders relay event đầu tiên.
+- Event trùng vẫn tốn một lần lookup User (làm trước runner). `fromBeginning:false`: khởi động Notification trước khi Orders relay event đầu tiên. Message phát lúc Notification đang down có thể bị bỏ (F1, xem [design-trade-offs.md §5 R20](../../docs/design-trade-offs.md)).
 - `PushProvider` đã đăng ký nhưng chưa handler nào gọi. Nội dung email hardcode tiếng Việt, chưa có template.
-- Chưa kiểm chứng trên Kafka/Postgres thật (chỉ unit test với mock).
+- Đã kiểm chứng E2E trên Kafka thật (E-03: email `SENT` theo trạng thái). Chưa có int-spec riêng cho Notification.

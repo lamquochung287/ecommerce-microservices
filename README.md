@@ -2,7 +2,7 @@
 
 Kiến trúc NestJS monorepo microservices phục vụ mục đích học tập về distributed systems, CQRS, orchestration event-driven (Outbox/Inbox qua Kafka), và checkout bất đồng bộ. Xây dựng bằng PostgreSQL, Redis, Kafka, MinIO, và OpenTelemetry observability.
 
-**Trạng thái**: Early-stage (Phase 0/1/2 + checkout v2 event-driven đã viết code; checkout v2 chưa kiểm chứng trên stack thật) | **Deployment**: Local Docker Compose | **Ngôn ngữ**: TypeScript/NestJS v11
+**Trạng thái**: Early-stage (Phase 0/1/2 + checkout v2 event-driven đã cutover; migration và int-spec pass trên Postgres/Kafka thật, E2E E-01…E-13 PASS; còn E-14 và k6) | **Deployment**: Local Docker Compose | **Ngôn ngữ**: TypeScript/NestJS v11
 
 ---
 
@@ -81,7 +81,8 @@ Các service:
 - **Kafka**: localhost:9092 (host) / `kafka:29092` (trong Docker network; tắt auto-create topic, topic do service tạo lúc khởi động)
 - **Jaeger UI**: http://localhost:16686
 - **Prometheus**: http://localhost:9090
-- **Grafana**: http://localhost:3100 (mặc định: admin/admin) — dashboard "Ecommerce - Server Overview" được provision sẵn từ `grafana/`
+- **Grafana**: http://localhost:3100 (mặc định: admin/admin) — 3 dashboard được provision từ `grafana/dashboards/`: "Ecommerce - Server Overview", "Ecommerce - Infrastructure" (PostgreSQL, Redis, Kafka, pipeline nghiệp vụ), "k6 Load Test"
+- **Exporter** (không mở cổng ra host): postgres-exporter, redis-exporter, kafka-exporter, nằm trong network compose cho Prometheus
 - **MinIO Console**: http://localhost:9001 (mặc định: minioadmin/minioadmin)
 
 ### 2b. Tạo file `.env`
@@ -103,8 +104,10 @@ Tuỳ chọn: `ORDER_TAX_RATE`, `ORDER_SHIPPING_FEE_FLAT`, `CART_TTL_SECONDS`, `
 ### 3. Chạy Migration
 
 ```bash
-npm run typeorm migration:run
+npm run migration:run
 ```
+
+> Migration cũng tự chạy khi mỗi service khởi động (`migrationsRun: true`). Trên DB có dữ liệu thật, **backup trước**: migration checkout v2 xoá cột `stock` và đổi enum trạng thái đơn, `down` không khôi phục đầy đủ. Chi tiết: [docs/database-schema.md §8](docs/database-schema.md).
 
 ### 4. Khởi động các Service
 
@@ -116,25 +119,17 @@ npm run start:all
 
 **Từng app**: `npm run start:gateway|user|product|orders|payment|notification|review|promotion|inventory|shipping`.
 
-**Production (chạy từng service riêng)**:
+**Chạy từng service đã build** (không dùng `start:prod`, script này trỏ tới file không tồn tại):
 
 ```bash
-# Terminal 1: Gateway (điểm vào HTTP)
-npm run start:prod -- --scope=gateway
-
-# Terminal 2: User Service
-npm run start:prod -- --scope=user
-
-# Terminal 3: Product Service
-npm run start:prod -- --scope=product
-
-# Terminal 4: Order Service
-npm run start:prod -- --scope=orders
-
-# Terminal 5+: payment, notification, review, promotion, inventory, shipping
-npm run start:prod -- --scope=payment
-# ... tương tự cho các service còn lại
+npm run build                          # hoặc: npx nest build <app>
+node dist/apps/gateway/main.js         # Terminal 1: Gateway (điểm vào HTTP)
+node dist/apps/user/main.js            # Terminal 2: User
+node dist/apps/orders/main.js          # Orders (TCP + Kafka)
+# payment, product, notification, review, promotion, inventory, shipping: tương tự
 ```
+
+Chạy riêng từng service thì vẫn cần đủ biến `.env` (mục 2b).
 
 ### 5. Truy cập API
 
@@ -147,17 +142,17 @@ npm run start:prod -- --scope=payment
 ```bash
 # Đăng ký user
 curl -X POST http://localhost:3000/user/register \
-  -H "Content-Type: application/json" \
-  -d '{"email":"user@example.com","password":"secure123"}'
+  -H "x-api-key: <API_KEY>" -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"secure123","fullName":"Nguyen Van A"}'
 
 # Đăng nhập
 curl -X POST http://localhost:3000/user/login \
-  -H "Content-Type: application/json" \
+  -H "x-api-key: <API_KEY>" -H "Content-Type: application/json" \
   -d '{"email":"user@example.com","password":"secure123"}'
 
 # Lấy danh sách sản phẩm (cần JWT trong header Authorization)
 curl -X GET http://localhost:3000/products \
-  -H "Authorization: Bearer <accessToken>"
+  -H "x-api-key: <API_KEY>" -H "Authorization: Bearer <accessToken>"
 
 # Checkout (chọn món trong giỏ; số lượng lấy từ giỏ, giá lấy từ server).
 # Bắt buộc x-api-key và x-idempotency-key; trả payment_url (đơn PENDING_PAYMENT).
@@ -276,18 +271,18 @@ libs/                          # Thư viện dùng chung
 ├── messaging/                 # Kafka: outbox relay, inbox, consumer runner, producer
 └── constant/                  # Message pattern, Kafka topic/type, port, permission
 
-docs/                          # Tài liệu
-├── project-overview-pdr.md            # Tổng quan & PDR (hệ thống làm gì)
-├── codebase-summary.md                # Cấu trúc monorepo, tổng quan apps/libs
-├── code-standards.md                  # Quy ước code, cấu trúc CQRS, validation, error handling
-├── system-architecture.md             # Tổng quan kiến trúc, sơ đồ hệ thống
-├── system-architecture-orders-flow.md # Orchestration checkout v2, Outbox/Inbox, Locking
-├── target-checkout-architecture.md    # Thiết kế checkout v2 + trạng thái implement/kiểm chứng
-├── system-architecture-auth-flow.md   # Login, verify token, refresh, logout
-├── system-architecture-gateway-flow.md # Middleware chain của Gateway
-└── project-roadmap.md                 # Trạng thái hiện tại, phase, gap, next step
+docs/                          # Tài liệu (xem bảng "Tài liệu" bên dưới)
+├── onboarding-guide.md · project-overview-pdr.md · codebase-summary.md
+├── business-flows.md · module-processing-flows.md · design-trade-offs.md
+├── system-architecture.md · system-architecture-orders-flow.md · system-architecture-gateway-flow.md · system-architecture-auth-flow.md
+├── target-checkout-architecture.md · database-schema.md · code-standards.md
+└── load-testing-guide.md · project-roadmap.md
 
-docker-compose.yml             # Hạ tầng: Postgres, Redis, Kafka, Jaeger, Prometheus, Grafana, MinIO
+plans/                         # Plan và báo cáo kiểm thử checkout v2
+grafana/ · monitoring/         # Dashboard Grafana, provisioning, truy vấn tuỳ biến cho postgres-exporter
+loadtest/ · http/ · scripts/   # k6 + compose load test · request mẫu · seed.ts
+
+docker-compose.yml             # Hạ tầng: Postgres, Redis, Kafka (KRaft), exporter (postgres/redis/kafka), Jaeger, Prometheus, Grafana, MinIO
 package.json                   # Dependencies, script
 nest-cli.json                  # Cấu hình monorepo
 ```
@@ -306,8 +301,14 @@ Bắt đầu từ đây để hiểu hệ thống:
 | [`docs/system-architecture.md`](docs/system-architecture.md)                           | Hệ thống hoạt động **như thế nào**: pattern, flow, data path, observability |
 | [`docs/system-architecture-orders-flow.md`](docs/system-architecture-orders-flow.md)   | Chi tiết orchestration checkout v2, Outbox/Inbox Kafka, Locking             |
 | [`docs/target-checkout-architecture.md`](docs/target-checkout-architecture.md)         | Thiết kế checkout v2 đã chốt + bảng trạng thái implement/kiểm chứng (§10)   |
-| [`docs/system-architecture-auth-flow.md`](docs/system-architecture-auth-flow.md)       | Chi tiết Login, Verify Token, Refresh, Logout                               |
-| [`docs/system-architecture-gateway-flow.md`](docs/system-architecture-gateway-flow.md) | Chi tiết middleware chain của Gateway                                       |
+| [`docs/system-architecture-auth-flow.md`](docs/system-architecture-auth-flow.md)       | Chi tiết Login, Verify Token, Logout, RBAC (không có refresh endpoint)      |
+| [`docs/system-architecture-gateway-flow.md`](docs/system-architecture-gateway-flow.md) | Pipeline Gateway, idempotency, bảng route                                   |
+| [`docs/onboarding-guide.md`](docs/onboarding-guide.md)                                 | **Đọc tài liệu theo thứ tự nào**, chạy thử, checklist "đã nắm dự án"        |
+| [`docs/business-flows.md`](docs/business-flows.md)                                     | Luồng nghiệp vụ end-to-end, rule, state machine                             |
+| [`docs/module-processing-flows.md`](docs/module-processing-flows.md)                   | Xử lý chi tiết từng module                                                  |
+| [`docs/design-trade-offs.md`](docs/design-trade-offs.md)                               | Quyết định thiết kế, đánh đổi, rủi ro R1–R20 và câu hỏi mở                  |
+| [`docs/database-schema.md`](docs/database-schema.md)                                   | Bảng, quan hệ, index, migration                                             |
+| [`docs/load-testing-guide.md`](docs/load-testing-guide.md)                             | k6, sizing VPS 4 vCPU/8 GB, đọc dashboard                                   |
 | [`docs/project-roadmap.md`](docs/project-roadmap.md)                                   | Hiện đang **ở đâu**: phase đã xong, gap, next step                          |
 | [`CLAUDE.md`](CLAUDE.md)                                                               | Hướng dẫn cho AI agent (rule cấp dự án; đọc trước nếu dùng Claude)          |
 
@@ -326,11 +327,11 @@ Hướng dẫn riêng từng app:
 - **Phase 0** (Foundations): Health check, graceful shutdown, migration, idempotency, outbox pattern
 - **Phase 1** (Core): User auth, Product catalog, Cart, RBAC, Sổ địa chỉ
 - **Phase 2** (Ecosystem): Payment (simulate), Notification, Review, Promotion, MinIO
-- **Checkout v2 (event-driven)**: Kafka + Outbox/Inbox, Inventory, Payment intent/webhook/refund, Shipping, voucher nối checkout, huỷ/hoàn hàng, scheduler, Gateway checkout chọn món + idempotency + simulator; Saga cũ đã xoá (code + unit test + build xanh; **chưa chạy migration/seed/int-spec/e2e trên stack thật**)
+- **Checkout v2 (event-driven)**: Kafka + Outbox/Inbox, Inventory, Payment intent/webhook/refund, Shipping, voucher nối checkout, huỷ/hoàn hàng, scheduler, Gateway checkout chọn món + idempotency + simulator; Saga cũ đã xoá. Đã kiểm chứng: migration (DB test và dev), 33/33 int-spec trên Postgres + Kafka, E2E E-01…E-13 PASS (`plans/261015-1700-checkout-v2-event-driven/reports/e2e-test-report.md`)
 
 ### Đang làm / TODO 🔄
 
-- **Kiểm chứng checkout v2 trên stack thật** (runbook trong `plans/261015-1700-checkout-v2-event-driven/reports/phase-14-report.md`)
+- **Hoàn tất kiểm chứng checkout v2**: E-14 (Kafka tắt), k6 có số đo, seed lại; chọn phương án cho F1 (message bị bỏ khi consumer down)
 - **Phase 3** (Production Hardening):
   - Hoàn thiện observability (Jaeger, Prometheus, Grafana dashboard)
   - Payment/Shipping provider thật (hiện chỉ simulator), Email/push provider thật (Resend, FCM)
@@ -340,7 +341,7 @@ Hướng dẫn riêng từng app:
 
 - Product catalog chưa có Redis caching (mọi read đều hit Postgres)
 - Push notification đã wiring nhưng chưa hoạt động
-- `GET /orders`, `GET /orders/:id`, `GET /orders/:id/refunds`, addresses chưa kiểm tra chủ sở hữu
+- `GET /orders`, `GET /orders/:id`, `GET /orders/:id/refunds`, addresses, `POST /user/logout` chưa kiểm tra chủ sở hữu hoặc JWT
 - Hoàn tiền `FAILED` không retry được (admin xử lý tay); crash giữa reserve voucher và tạo đơn làm kẹt lượt voucher
 - Chưa có file `.env.example` (danh sách biến ở mục 2b)
 
@@ -355,13 +356,14 @@ Xem đầy đủ trạng thái & gap tại [`docs/project-roadmap.md`](docs/proj
 - **Validation**: Mọi DTO dùng decorator `class-validator` (`@IsString()`, `@IsEmail()`, v.v.)
 - **Error**: Throw `RpcException` hoặc exception built-in của NestJS, không dùng `Error` thô
 - **Config**: Luôn dùng `ConfigService`, không truy cập `process.env` trực tiếp
-- **CQRS**: Orders, Product, Payment, Review, Promotion BẮT BUỘC dùng CQRS (commands/queries/handlers); User/Notification chủ ý đơn giản hơn
+- **CQRS**: Orders, Product, Payment, Review, Promotion, Inventory, Shipping BẮT BUỘC dùng CQRS (commands/queries/handlers); User/Notification chủ ý đơn giản hơn
 - **Naming**:
-  - File: kebab-case (vd: `create-order.handler.ts`)
-  - Class: PascalCase (vd: `CreateOrderHandler`)
+  - File: kebab-case (vd: `checkout.handler.ts`)
+  - Class: PascalCase (vd: `CheckoutHandler`)
   - Biến: camelCase (vd: `productId`)
-  - Hằng số: UPPER_SNAKE_CASE (vd: `MAX_STOCK`)
-  - Database: snake_case cho table & column
+  - Hằng số: UPPER_SNAKE_CASE (vd: `DEFAULT_TCP_TIMEOUT_MS`)
+  - Database: tên bảng snake_case số nhiều (`orders`, `stock_items`); cột theo tên property (camelCase, vd `userId`); khoá ngoại `@JoinColumn({ name: 'order_id' })`
+  - Kafka: event type PascalCase (`OrderCreated`), topic kebab-case (`order-events`)
 
 Đọc [`docs/code-standards.md`](docs/code-standards.md) để xem đầy đủ quy tắc.
 
@@ -420,5 +422,5 @@ Tham khảo:
 ---
 
 **Cập nhật lần cuối**: 2026-10-15
-**Phase đã hoàn thành**: 0, 1, 2, checkout v2 (code)
-**Phase tiếp theo**: kiểm chứng checkout v2 trên stack thật, rồi 3 (Production hardening)
+**Phase đã hoàn thành**: 0, 1, 2, checkout v2 (code + kiểm chứng trên stack thật một phần)
+**Phase tiếp theo**: hoàn tất kiểm chứng checkout v2 (E-14, k6), rồi 3 (Production hardening)

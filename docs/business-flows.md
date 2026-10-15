@@ -7,7 +7,7 @@ Tài liệu mô tả **luồng nghiệp vụ end-to-end** (nhiều service phố
 
 > Luồng checkout/state machine dưới đây là **checkout v2 event-driven** (đã cutover, Saga đồng bộ cũ đã xoá). Thiết kế gốc + trạng thái triển khai: [target-checkout-architecture.md](./target-checkout-architecture.md).
 >
-> **Trạng thái kiểm chứng**: code + unit test (mock) + build đã xong; các luồng Postgres/Kafka thật (migration, int-spec, e2e) **chưa kiểm chứng trên stack thật** tại thời điểm viết.
+> **Trạng thái kiểm chứng** (2026-10-15): migration checkout v2 đã chạy trên DB test (`ecommerce_test`, up/down/up) và DB dev; 33/33 int-spec pass trên Postgres + Kafka thật; E2E E-01…E-13 PASS trên stack thật. **Chưa kiểm chứng**: E-14 (Kafka tắt 30 giây), k6 sau cutover, và lỗi F1 (message bị bỏ khi consumer down, xem [design-trade-offs.md §2.4](./design-trade-offs.md)). Chi tiết: [e2e-test-report.md](../plans/261015-1700-checkout-v2-event-driven/reports/e2e-test-report.md).
 >
 > Quy ước: **[ĐÃ CÓ]** = code đang thực thi; **[CHƯA CÓ]** = nghiệp vụ mong đợi nhưng code chưa làm (ghi rõ để tránh hiểu nhầm).
 
@@ -184,7 +184,7 @@ Terminal: `CANCELLED`, `REFUNDED`, `COMPLETED`. `SHIPPED`/`DELIVERED` không hu�
 - Race huỷ vs `ShipmentCreated` ở `FULFILLING`: bên cập nhật trước thắng. Huỷ thắng → `CANCELLED`, `ShipmentCreated` tới sau → Orders gửi `CancelShipment`. `ShipmentCreated` thắng → `SHIPPED`, huỷ bị 409.
 - Race huỷ vs `CommitInventory` ở `PAID`: `RestockInventory` cùng partition key `orderId` với `CommitInventory` nên Inventory xử lý đúng thứ tự (commit trước → restock cộng lại; reservation còn `RESERVED` → restock chỉ release). `InventoryCommitted` tới đơn đã `CANCELLED` thì bỏ qua, không tạo shipment.
 - **Huỷ**: `POST /orders/:id/cancel` — `PENDING_PAYMENT`: release kho, huỷ intent, không hoàn tiền; `PAID`/`FULFILLING`: `refundStatus=PENDING`, hoàn `total − phí ship`, restock (và `CancelShipment` nếu `FULFILLING`). `refundStatus` (`NONE|PENDING|SUCCEEDED|FAILED`) chỉ để hiển thị, cập nhật khi Payment báo `PaymentRefunded`/`PaymentRefundFailed` (kèm `refundedAmount`, `refundedAt`); `FAILED` cần admin xử lý tay.
-- **Dữ liệu cũ khi cutover**: migration chuyển `PENDING`/`PROCESSING` → `PENDING_PAYMENT` với `expiresAt = now()` (scheduler huỷ ngay) — đơn `PROCESSING` cũ đã thu tiền sẽ bị huỷ **không hoàn tiền**; chấp nhận vì dữ liệu hiện chỉ là seed/dev.
+- **Dữ liệu cũ khi cutover**: migration chuyển `PENDING`/`PROCESSING` → `PENDING_PAYMENT` với `expiresAt = now()` (scheduler huỷ ngay). Trên DB dev, 5.415 đơn `PENDING` + `PROCESSING` đã được chuyển và **đã huỷ hết** (2026-10-15: batch mặc định 100 đơn/30 giây, sau đó đặt `ORDER_LIFECYCLE_BATCH_SIZE=500` để dọn nhanh; hiện không còn đơn `PENDING_PAYMENT` cũ). Đơn `PROCESSING` cũ đã thu tiền sẽ bị huỷ **không hoàn tiền**. Chấp nhận cho dữ liệu dev; với dữ liệu thật phải có phương án riêng (xem [design-trade-offs.md](./design-trade-offs.md) §7, câu 2).
 
 ### 2.6 Hoàn tiền
 

@@ -2,7 +2,7 @@
 
 ## Vai trò
 Microservice hybrid quản lý voucher/coupon: TCP :3007 + Kafka consumer group `promotion-service` (chỉ consume `order-events`, không phát event, không chạy outbox relay). **CQRS**.
-Chi tiết: [docs/business-flows.md §2.8](../../docs/business-flows.md), [docs/module-processing-flows.md §8](../../docs/module-processing-flows.md), [docs/target-checkout-architecture.md §11.3](../../docs/target-checkout-architecture.md).
+Chi tiết: [docs/business-flows.md §2.8](../../docs/business-flows.md), [docs/module-processing-flows.md §8](../../docs/module-processing-flows.md), [docs/target-checkout-architecture.md §6–§7](../../docs/target-checkout-architecture.md).
 
 ## Chức năng
 - `CreateVoucher {code unique, discountType PERCENTAGE|FIXED, discountValue>0, minOrderValue≥0, expiresAt, usageLimit>0}` — code trùng → 409.
@@ -26,5 +26,5 @@ Chi tiết: [docs/business-flows.md §2.8](../../docs/business-flows.md), [docs/
 - Crash Orders giữa `RESERVE_VOUCHER` và TX tạo đơn → lượt bị giữ vĩnh viễn (redemption RESERVED mồ côi không có event huỷ). Orders release best-effort khi TX lỗi; rủi ro crash được chấp nhận.
 - `/vouchers/apply` cũ vẫn tiêu lượt không gắn đơn và không hoàn.
 - Code phân biệt hoa/thường; không có `isActive`, không giới hạn theo sản phẩm/danh mục.
-- Consumer `fromBeginning:false`: khởi động Promotion trước khi Orders phát event đầu tiên.
+- Consumer `fromBeginning:false`: khởi động Promotion trước khi Orders phát event đầu tiên. Message phát lúc Promotion đang down có thể bị bỏ (F1, xem [design-trade-offs.md §5 R20](../../docs/design-trade-offs.md)); khi đó voucher không được confirm hoặc release.
 - Bảng `voucher_redemptions` do migration `AddVoucherRedemptions` tạo.

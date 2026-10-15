@@ -30,4 +30,6 @@ Consumer group `shipping-service` nghe `shipping-commands` (`ShippingCommandsCon
 ## Lưu ý
 - Timer giao hàng nằm trong bộ nhớ, mất khi restart; `SIMULATE_DELIVERY` vẫn kích hoạt tay được.
 - Carrier được gọi trong TX của runner (chấp nhận với simulator); carrier thật nên gọi ngoài TX rồi mới ghi.
-- Cần `KAFKA_BROKERS` trong `.env`; khởi động Shipping trước khi Orders relay `CreateShipment` (`fromBeginning:false`).
+- Cần `KAFKA_BROKERS` trong `.env`; khởi động Shipping trước khi Orders relay `CreateShipment` (`fromBeginning:false`). F1: `CreateShipment` phát lúc Shipping đang down có thể bị bỏ, đơn kẹt `FULFILLING` (đã tái hiện E2E, xem [design-trade-offs.md §5 R20](../../docs/design-trade-offs.md)).
+- `eventId` của webhook giao hàng phải là UUID (sai → 400). Lý do: cột `processed_messages.eventId` là `uuid`.
+- Đã kiểm chứng: `shipping.int-spec.ts` (5/5) trên Postgres; E2E E-03, E-11.

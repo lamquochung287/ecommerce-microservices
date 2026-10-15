@@ -4,7 +4,7 @@
 
 Tài liệu con của [system-architecture.md](./system-architecture.md). Mô tả các pattern trong luồng đơn hàng sau cutover checkout v2: Orchestration (Orders điều phối bằng event/command), Reserve → commit/release kho, Transactional Outbox + Inbox qua Kafka, khoá lạc quan trên Order, và flow end-to-end. Thiết kế gốc: [target-checkout-architecture.md](./target-checkout-architecture.md). Saga đồng bộ cũ (trừ kho → tạo đơn → charge → PROCESSING) **đã bị xoá**.
 
-> **Trạng thái kiểm chứng**: code và unit test (mock) đã xong, `nest build` xanh; migration, int-spec (Postgres) và e2e qua Kafka thật **chưa chạy** tại thời điểm viết — chi tiết ở [target-checkout-architecture.md §10](./target-checkout-architecture.md).
+> **Trạng thái kiểm chứng** (2026-10-15): migration áp trên DB test và dev; 33/33 int-spec pass trên Postgres + Kafka thật; E2E E-01…E-13 PASS trên stack thật. Chưa kiểm chứng: E-14 (Kafka tắt) và lỗi F1 (xem mục 2). Chi tiết ở [target-checkout-architecture.md §10](./target-checkout-architecture.md).
 
 ---
 
@@ -49,7 +49,8 @@ PENDING_PAYMENT ─PaymentSucceeded─▶ PAID ─InventoryCommitted─▶ FULFI
 2. `Inventory.RESERVE` trả luôn phần giữ của đơn `replaces`; nếu sau đó voucher/TX lỗi thì đơn cũ còn `PENDING_PAYMENT` mà mất reservation (chốt #2/scheduler huỷ khi tới).
 3. `PaymentRefundFailed` ở luồng hoàn hàng → đơn kẹt `REFUNDING`; refund `FAILED` không retry được.
 4. Thanh toán muộn vào đơn `CANCELLED` → hoàn toàn bộ số đã thu (mặc định, chưa được xác nhận riêng).
-5. SQL `replaces` (raw `orders JOIN order_items`), `UPDATE refunds` raw và `manager.insert(Refund, {order:{id}})` mới chỉ được kiểm bằng mock.
+5. SQL `replaces` (raw `orders JOIN order_items`) và `UPDATE refunds` raw đã có int-spec pass trên Postgres. `manager.insert(Refund, {order:{id}})` chưa có kiểm chứng riêng.
+6. **F1 (consumer down làm mất message)**: đơn có thể kẹt `FULFILLING` khi Shipping tắt lúc Orders phát `CreateShipment`. Đã tái hiện ở E2E; chưa có reconcile (xem [design-trade-offs.md §5 R20](./design-trade-offs.md)).
 
 ---
 
@@ -81,7 +82,7 @@ PENDING_PAYMENT ─PaymentSucceeded─▶ PAID ─InventoryCommitted─▶ FULFI
 - Outbox lưu **payload**; envelope `{eventId, type, orderId, occurredAt, version, payload}` được dựng lúc relay.
 - **At-least-once**, không exactly-once: consumer idempotent nhờ Inbox và nhờ đọc lại đơn + kiểm lại `canTransition` trong mỗi lần xử lý.
 - Producer kết nối lười (Kafka tắt lúc boot không làm sập relay); `ensureKafkaTopics` gọi trong `main.ts` (broker tắt auto-create).
-- Consumer `fromBeginning:false`: message phát trước khi group join lần đầu bị bỏ → khởi động Orders/Inventory/Shipping/Promotion/Notification trước khi có event đầu tiên.
+- Consumer `fromBeginning:false`: message phát khi consumer đang down có thể bị bỏ nếu partition chưa có offset đã commit, kể cả khi group đã tồn tại (F1, đã tái hiện ở E2E). Khởi động Orders/Inventory/Shipping/Promotion/Notification trước khi có event đầu tiên.
 - Giới hạn: `FAILED` chưa có alert rule/replay; DLQ chưa có công cụ replay. Chi tiết: [design-trade-offs.md §2.4](./design-trade-offs.md#24-transactional-outbox--inbox-qua-kafka-at-least-once).
 
 ---

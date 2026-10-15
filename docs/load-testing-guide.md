@@ -24,7 +24,8 @@ Phân bổ quota (tổng 4 CPU / 8 GB, đổi bằng biến `LT_*`): apps 1.8 CP
 # 2. Dựng stack có giới hạn tài nguyên (lần đầu build image rất lâu)
 npm run loadtest:up
 
-# 3. Seed dữ liệu vào Postgres của stack (cần apps đã chạy xong để migration tạo bảng)
+# 3. Seed dữ liệu vào Postgres của stack (bảng do service `migrate` của compose tạo trước khi apps chạy;
+#    seed.ts đang trỏ cứng DB `ecommerce`, khớp với DB của stack)
 npm run seed
 
 # 4. Thu CPU/RAM container (terminal riêng)
@@ -65,5 +66,5 @@ SLO trong `thresholds` của kịch bản: lỗi server < 1% (5xx, timeout, 429)
 - Hầu hết đo qua Docker Desktop (WSL2): CPU mỗi core có thể khác VPS, nên xem kết quả là tương đối. Nên chạy lại một lần trên VPS thật trước khi chốt.
 - Trace OTLP gửi tới `localhost:4318` bên trong container `apps` (không có Jaeger ở đó), nên chi phí tracing không giống khi Jaeger chạy thật.
 - Checkout **giữ** kho (reserve, TTL 15'): `onHand` seed không giảm nhưng `reserved` tăng; sản phẩm hết hàng bị từ chối 409 (đếm ở `lt_checkout_rejected`, không tính là lỗi server). Checkout lặp trên cùng sản phẩm của cùng user thay thế đơn cũ (`replaces`). Seed lại DB giữa các lần chạy để so sánh công bằng.
-- **Chưa chạy lại k6 sau cutover** (kịch bản và compose chỉ được sửa mã); cần stack có Kafka và migration mới (`loadtest/migrate.js`) trước khi đo.
+- **Chưa có số đo k6 sau cutover**: kịch bản và compose đã được sửa mã, chưa có output k6 chính thức trong repo. Thư mục `loadtest/results/` có `docker-stats-500vu.csv` và `docker-stats-500vu-split.csv` (CPU/RAM, ghi từ 14:16 đến 20:59 ngày 2026-10-15, đang được ghi khi kiểm tra). Chưa xác nhận đây là lần chạy k6 sau cutover; chỉ coi là số đo khi có k6 summary đi kèm và đã đối chiếu.
 - Mỗi VU dùng cố định 1 user trong `scripts/seeded-users.csv` (2000 user), nên 500 VU không đụng nhau về cart.

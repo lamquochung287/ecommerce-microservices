@@ -1,7 +1,7 @@
 # Module Processing Flows — xử lý chi tiết từng module
 
 **Ngày cập nhật**: 2026-10-15
-**Nguồn**: đọc trực tiếp code (checkout v2 đã cutover). Phần chưa chạy trên Postgres/Kafka thật được ghi rõ "chưa kiểm chứng trên stack thật". Mỗi mục: trách nhiệm → API/pattern → luồng xử lý từng bước → rule/ràng buộc → điểm cần lưu ý.
+**Nguồn**: đọc trực tiếp code (checkout v2 đã cutover). Trạng thái kiểm chứng ghi ở từng mục: đã có int-spec pass trên Postgres/Kafka thật hoặc E2E PASS, hoặc ghi rõ "chưa kiểm chứng". Mỗi mục: trách nhiệm → API/pattern → luồng xử lý từng bước → rule/ràng buộc → điểm cần lưu ý.
 
 Xem luồng nghiệp vụ xuyên service ở [business-flows.md](./business-flows.md); đánh đổi thiết kế ở [design-trade-offs.md](./design-trade-offs.md).
 
@@ -25,7 +25,7 @@ Xem luồng nghiệp vụ xuyên service ở [business-flows.md](./business-flow
 | inventory | 3008 | `inventory-service` | 9472 |
 | shipping | 3009 | `shipping-service` | 9473 |
 
-(Port TCP lấy từ `libs/constant/port-tcp.constant.ts`; metrics port đối chiếu các `setupTracing(...)` — `prometheus.yml` chưa có target cho inventory/shipping. Host TCP đang **hardcode `localhost`** → chạy nhiều container cần đổi, xem trade-offs.)
+(Port TCP lấy từ `libs/constant/port-tcp.constant.ts`; metrics port đối chiếu các `setupTracing(...)`; `prometheus.yml` đã có đủ target của 10 service. Host TCP đang **hardcode `localhost`** → chạy nhiều container cần đổi, xem trade-offs.)
 
 ### 0.2 Cấu hình & DB
 - `CommonConfigModule` nạp `.env` và **validate bắt buộc** (`validateEnv`): `DB_*`, `REDIS_HOST/PORT`, `JWT_ACCESS_*`, `JWT_REFRESH_*`, `API_KEY`, `KAFKA_BROKERS`, `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` → thiếu một biến là **mọi** service không lên (kể cả Gateway/User, vì dùng chung `validateEnv`; jest import `@lib/common` không mock cũng sẽ ném lỗi nếu shell thiếu các biến này).
@@ -38,8 +38,8 @@ Service ném `RpcException({statusCode,message})` hoặc `*Exception` của Nest
 ### 0.3a Messaging Kafka (`libs/messaging`)
 - **Outbox**: mọi event/command ra ngoài ghi bằng `OutboxWriter.append(manager, {topic, type, orderId, payload})` **cùng transaction** với đổi state; row có `source` (service sở hữu), `topic`, `key = orderId`, `eventId`, `seq`. `OutboxRelayService` mỗi service chỉ relay row `source` của mình: `SELECT ... FOR UPDATE SKIP LOCKED` (an toàn nhiều instance, giữ thứ tự theo key) → `KafkaProducerService.send` (acks=all, idempotent producer) → **chỉ đánh dấu `PUBLISHED` sau khi broker ack**; lỗi → backoff + `retryCount`, quá `OUTBOX_MAX_RETRY` → `FAILED` + metric `outbox_failed_total{source}`. ⇒ **at-least-once**. Envelope `{eventId, type, orderId, occurredAt, version, payload}`.
 - **Inbox + consumer**: `KafkaConsumerRunner.run({consumer, topic, message, handle, onExhausted})` — mở 1 transaction: `INSERT processed_messages (consumer, eventId) ON CONFLICT DO NOTHING` (trùng → bỏ qua) → `handle(manager)` (đổi state + ghi outbox cùng transaction) → commit → `afterCommit`. Lỗi → rollback (inbox cũng rollback) → retry tối đa `KAFKA_CONSUMER_MAX_ATTEMPTS`=3 → gửi `<topic>.dlq` → `onExhausted` (vd Shipping phát `ShipmentFailed`, Payment phát `PaymentRefundFailed`). Envelope sai → DLQ. `onExhausted` hoặc gửi DLQ lỗi thì runner ném để Kafka giao lại.
-- Topic: `order-events`, `payment-events`, `payment-commands`, `inventory-commands`, `inventory-events`, `shipping-commands`, `shipping-events` (+ `.dlq`); partition key = `orderId` để giữ thứ tự theo đơn. Consumer `fromBeginning:false` → khởi động consumer trước khi producer phát message đầu tiên.
-- Chưa kiểm chứng trên Kafka thật qua toàn luồng (relay/producer có int-spec đã chạy ở nền tảng; phần còn lại chỉ unit test mock).
+- Topic: `order-events`, `payment-events`, `payment-commands`, `inventory-commands`, `inventory-events`, `shipping-commands`, `shipping-events` (+ `.dlq`); partition key = `orderId` để giữ thứ tự theo đơn. Consumer `fromBeginning:false` → khởi động consumer trước khi producer phát message đầu tiên. **Cảnh báo F1**: message phát khi consumer down có thể bị bỏ nếu partition chưa có offset commit, kể cả khi group đã tồn tại (đã tái hiện ở E2E, xem [design-trade-offs §5 R20](./design-trade-offs.md)).
+- Trạng thái: luồng nhiều service qua Kafka đã chạy đúng ở E2E E-01…E-13 trên stack thật. Chưa kiểm: E-14 (Kafka tắt 30 giây).
 
 ### 0.4 Pattern CQRS dùng chung
 Controller `@MessagePattern({cmd})` → `CommandBus/QueryBus.execute(...)` → Handler. Áp dụng ở product, orders, payment, review, promotion, inventory, shipping. Consumer Kafka là controller mỏng → `CommandBus` (`Handle...MessageCommand`) → handler gọi `KafkaConsumerRunner`. **User và Notification không dùng CQRS** (service/controller trực tiếp) — chủ ý vì nghiệp vụ nhỏ.
@@ -147,7 +147,7 @@ Redis string `cart:{userId}` = JSON `{userId, items[{productId,quantity}], updat
 Các bước và rule xem [business-flows §2.4](./business-flows.md#24-giỏ-hàng--checkout-v2--đơn-hàng-luồng-trọng-tâm). Bổ sung kỹ thuật:
 - Orders không có `ValidationPipe` ở biên TCP nên tự validate (`plainToInstance + validateSync({whitelist:true})`): field lạ bị loại, `shippingAddress` thiếu/items rỗng/UUID sai → 400. `userId` chỉ lấy từ tham số TCP.
 - `OrderPricingService.priceItems(lines, voucherCode?)`: giá từ `ProductClient` (404/inactive/giá sai → 400; lỗi khác giữ nguyên), `discountAmount` từ Promotion; `refundAmountOf = total − ship`.
-- Tìm `replaces`: một raw query `orders JOIN order_items` (userId, `PENDING_PAYMENT`, `deletedAt IS NULL`, `DISTINCT`, `LIMIT 50` khớp giới hạn Inventory) — **chưa kiểm chứng trên Postgres thật** (có int-spec viết sẵn, chưa chạy). Huỷ đơn cũ trong TX tạo đơn mới: lệch version → bỏ qua; lỗi khác → rollback + `Inventory.RELEASE(orderId mới)`.
+- Tìm `replaces`: một raw query `orders JOIN order_items` (userId, `PENDING_PAYMENT`, `deletedAt IS NULL`, `DISTINCT`, `LIMIT 50` khớp giới hạn Inventory) — đã có `checkout.int-spec.ts` chạy pass trên Postgres thật. Huỷ đơn cũ trong TX tạo đơn mới: lệch version → bỏ qua; lỗi khác → rollback + `Inventory.RELEASE(orderId mới)`.
 - Gắn intent sau checkout dùng `updateWithVersion`; mọi lỗi ở bước này chỉ log, vẫn trả `PENDING_PAYMENT + payment_url`.
 - Cửa sổ lỗi còn lại: crash sau `Inventory.RESERVE`/`RESERVE_VOUCHER` nhưng trước TX tạo đơn → kho tự hết hạn (job Inventory), **lượt voucher bị giữ vĩnh viễn**; `Inventory.RESERVE` trả luôn phần giữ của đơn `replaces`, nếu sau đó voucher/TX lỗi thì đơn cũ còn `PENDING_PAYMENT` mà mất reservation (chốt #2/scheduler huỷ khi tới).
 
@@ -158,10 +158,10 @@ Mỗi lần xử lý (kể cả retry) đọc lại đơn trong TX rồi quyết
 - **shipping-events**: `ShipmentCreated` — `FULFILLING` → `SHIPPED` (+`trackingCode`; thiếu → ném); `CANCELLED` → outbox `CancelShipment`. `ShipmentDelivered` — `SHIPPED` → `DELIVERED` (+`deliveredAt`; không parse được → ném). `ShipmentFailed` — `FULFILLING` → `cancelPaid(SHIPMENT_FAILED, {restock:true, cancelShipment:false})`; `CANCELLED` → no-op.
 
 ### Huỷ / hoàn hàng (`CancelOrderHandler`, `RequestReturnHandler`)
-Mỗi request = 1 `dataSource.transaction` (đọc đơn + transition + outbox). Quy tắc xem [business-flows §2.5-2.6](./business-flows.md#25-vòng-đời-đơn-hàng-state-machine). Không phải chủ đơn → 404; lệch version → 409 (không retry). Hoàn hàng chèn Refund (`manager.insert(Refund, {order:{id}, amount, reason, status:PENDING})`) sau transition — SQL raw/insert này **chưa kiểm chứng trên Postgres thật**.
+Mỗi request = 1 `dataSource.transaction` (đọc đơn + transition + outbox). Quy tắc xem [business-flows §2.5-2.6](./business-flows.md#25-vòng-đời-đơn-hàng-state-machine). Không phải chủ đơn → 404; lệch version → 409 (không retry). Hoàn hàng chèn Refund (`manager.insert(Refund, {order:{id}, amount, reason, status:PENDING})`) sau transition. Raw `UPDATE refunds` đã có int-spec pass trên Postgres; riêng `manager.insert(Refund, {order:{id}})` **chưa có kiểm chứng riêng**.
 
 ### Scheduler (`OrderLifecycleScheduler`)
-`@Cron` 30 giây → `ExpirePendingOrdersCommand`; 10 phút → `CompleteDeliveredOrdersCommand`; mỗi job có cờ chống chạy chồng, batch 100 (`ORDER_LIFECYCLE_BATCH_SIZE`). Handler: `find` ứng viên (ORDER BY `expiresAt`/`deliveredAt` ASC) rồi **mỗi đơn 1 TX**, đọc lại + kiểm lại điều kiện; lệch version/đổi trạng thái → `skipped`; lỗi khác → `failed` + log, không chặn đơn sau.
+`@Cron` 30 giây → `ExpirePendingOrdersCommand`; 10 phút → `CompleteDeliveredOrdersCommand`; mỗi job có cờ chống chạy chồng, batch mặc định 100, đổi bằng env `ORDER_LIFECYCLE_BATCH_SIZE` (compose loadtest đang đặt 500). Handler: `find` ứng viên (ORDER BY `expiresAt`/`deliveredAt` ASC) rồi **mỗi đơn 1 TX**, đọc lại + kiểm lại điều kiện; lệch version/đổi trạng thái → `skipped`; lỗi khác → `failed` + log, không chặn đơn sau.
 
 ### Queries
 `GetOrders(userId?)` (không phân trang, mới nhất trước; không truyền `userId` = **trả toàn bộ đơn**), `GetOrder(id)` (404 nếu không có; eager load `items`; **không** kiểm chủ sở hữu), `GetRefunds(orderId)`.
@@ -189,7 +189,7 @@ Mỗi request = 1 `dataSource.transaction` (đọc đơn + transition + outbox).
 - Simulator: `PAYMENT_SIM_MODE` `manual` (mặc định) | `auto-success` | `auto-fail` (hẹn giờ `PAYMENT_SIM_DELAY_MS`, timer `unref`, mất khi restart, tắt khi production). eventId tất định `${intentId}:${result}` nên bấm lặp = webhook trùng; không chặn khi intent đã `CANCELLED`/hết hạn (mô phỏng trả muộn).
 - Provider: DI token `PAYMENT_PROVIDER` (`useFactory` + `ConfigService`) với `createIntent`, `refund`, `signWebhook`, `verifyWebhook`; `buildWebhook` là phần riêng của simulator. Muốn thêm cổng thật: implement interface + đổi binding.
 - Refund `FAILED` không thử lại được (unique `orderId`) — admin xử lý tay. HMAC trên `JSON.stringify` phụ thuộc thứ tự key (provider thật phải ký raw body).
-- Chưa kiểm chứng trên Postgres/Kafka thật: migration `AddPaymentIntentAndRefund`, int-spec webhook/refund.
+- Đã kiểm chứng: migration `AddPaymentIntentAndRefund` áp được trên DB test và dev; `payment-webhook-refund.int-spec.ts` pass 4/4 trên Postgres thật (sau sửa lỗi kiểu tham số ở chính spec); E2E webhook sai chữ ký → 400.
 
 ---
 
@@ -198,7 +198,7 @@ Mỗi request = 1 `dataSource.transaction` (đọc đơn + transition + outbox).
 - `OrderEventsController`: một `@EventPattern('order-events', Transport.KAFKA)` → `KafkaConsumerRunner` (group `notification-service`, inbox theo `eventId`, retry 3 → DLQ `order-events.dlq`); `NotificationController` (`get_sent_notifications`, TCP).
 - Quy trình: type `OrderCreated`/`OrderStatusChanged` → lấy email qua `User.GET_USER_INFO` (làm trước transaction; lỗi → dùng `userId` làm recipient) → `EmailProvider.send` trong `handle` → ghi `sent_notifications`. `OrderPaid`/`OrderCancelled`/type khác: chỉ đánh dấu inbox.
 - Idempotent theo `eventId` (inbox). Provider ném lỗi → rollback + retry → DLQ; `success:false` → lưu `FAILED`. Email vẫn có thể trùng nếu commit lỗi sau khi provider đã gửi.
-- Subject/body hardcode tiếng Việt; `PushProvider` chưa được gọi. Chưa kiểm chứng trên Kafka thật.
+- Subject/body hardcode tiếng Việt; `PushProvider` chưa được gọi. Đã kiểm chứng E2E: group `notification-service` join được Kafka, email `SENT` cho FULFILLING/SHIPPED/DELIVERED/REFUNDING/REFUNDED, PAID không gửi (E-03). Lỗi đã sửa: `@MessagePattern` health thiếu `Transport.TCP` làm consumer không khởi động.
 
 ---
 
@@ -213,17 +213,17 @@ Mỗi request = 1 `dataSource.transaction` (đọc đơn + transition + outbox).
 `CreateVoucher` (unique `code`), `ApplyVoucher` (cũ: transaction + `pessimistic_write` lock, tiêu lượt ngay, không gắn đơn), `GetVouchers`, `GetAvailableVouchers` (lọc `usageCount < usageLimit` **ở tầng ứng dụng** sau khi query `expiresAt > now`).
 Luồng checkout (TCP, Orders gọi): `VALIDATE_VOUCHER` (query, không ghi) · `RESERVE_VOUCHER` (1 TX, `FOR UPDATE` voucher, `usageCount += 1`, insert `voucher_redemptions` `RESERVED`, idempotent theo `orderId`) · `RELEASE_VOUCHER` (`RESERVED → RELEASED`, `usageCount -= 1`, kẹp ≥ 0). Kafka `order-events` (group `promotion-service`, inbox): `OrderPaid` → `CONFIRMED` (một `UPDATE ... WHERE orderId AND status='RESERVED'`); `OrderCancelled{paid:false}` → release; `paid:true` hoặc thiếu cờ → bỏ qua (an toàn hơn trả nhầm lượt). Thứ tự khoá luôn voucher → redemption.
 Công thức/kiểm tra ở `domain/voucher-rules.ts` (404 → hết hạn → hết lượt → `orderValue < minOrderValue`; PERCENTAGE `round2(v×value/100)`, FIXED `min(value, orderValue)`); `orderValue` là subtotal.
-Code voucher **phân biệt hoa thường**. Không có `isActive`, không giới hạn theo user/sản phẩm/danh mục. Migration `AddVoucherRedemptions` chưa chạy trên DB thật.
+Code voucher **phân biệt hoa thường**. Không có `isActive`, không giới hạn theo user/sản phẩm/danh mục. Migration `AddVoucherRedemptions` đã áp trên DB test và dev; `voucher-reserve.int-spec.ts` pass 5/5; E2E E-12 kiểm được hết hạn → RELEASED, dùng lại voucher một lần → 400.
 
 ### 8a. Inventory Service (`apps/inventory`, :3008 + Kafka) — CQRS
 Sở hữu `stock_items(productId, variantId?, onHand, reserved)` (unique `NULLS NOT DISTINCT`, CHECK `reserved >= 0 AND onHand >= reserved`) và `reservations(orderId unique, items jsonb, status RESERVED|COMMITTED|RELEASED|EXPIRED|RESTOCKED, expiresAt)`; `available = onHand − reserved`.
 - TCP: `RESERVE` (1 TX; khoá `replaces` + mọi `stock_items` liên quan bằng một câu `ORDER BY id FOR UPDATE` → không deadlock; kiểm đủ hàng TRƯỚC khi ghi, thiếu → 409 kèm `productIds`; trả phần đơn cũ, tăng `reserved`; idempotent theo `orderId`), `CHECK_RESERVATION` (`valid = RESERVED && now < expiresAt`), `RELEASE`, `ADJUST_STOCK` (upsert; `onHand + delta < reserved|0` → 409), `GET_AVAILABILITY` (≤ 200 id; thiếu dòng = 0).
 - Kafka `inventory-commands` (group `inventory-service`, key orderId): `CommitInventory` (RESERVED → COMMITTED, trừ `onHand`/`reserved`; phát `InventoryCommitted`; đã COMMITTED → phát lại; RELEASED/EXPIRED/RESTOCKED/không có → `InventoryCommitFailed{reason}`), `ReleaseInventory` (chỉ khi RESERVED), `RestockInventory` (COMMITTED → cộng lại `onHand`, RESTOCKED; RESERVED → chỉ release; idempotent).
 - Job hết hạn (`@Cron`, `INVENTORY_EXPIRY_GRACE_SECONDS`): reservation `RESERVED` quá `expiresAt` → `EXPIRED` + trả `reserved` (batch 100, mỗi reservation 1 TX, `SKIP LOCKED`) — lưới an toàn khi Orders crash.
-- Chưa kiểm chứng trên Postgres thật: SQL `unnest(...)` với mảng chứa NULL, `FOR UPDATE OF s` + JOIN unnest, `ON CONFLICT` với unique index NULLS NOT DISTINCT.
+- Đã kiểm chứng trên Postgres thật (`reservation.int-spec.ts` 6/6, `inventory-commands.int-spec.ts` 4/4): SQL `unnest(...)` với mảng, `FOR UPDATE OF s` + JOIN unnest, `ON CONFLICT` với unique index NULLS NOT DISTINCT.
 
 ### 8b. Shipping Service (`apps/shipping`, :3009 + Kafka) — CQRS
-Sở hữu `shipments(orderId unique, status CREATED|DELIVERED|CANCELLED|FAILED, trackingCode, ...)`. Kafka `shipping-commands` (group `shipping-service`): `CreateShipment` (chưa có → carrier mô phỏng → `CREATED` + `ShipmentCreated{trackingCode}`; đã có → no-op; lỗi 3 lần → DLQ + TX riêng insert `FAILED` + `ShipmentFailed{reason}`), `CancelShipment` (khoá dòng `pessimistic_write`; `CREATED` → `CANCELLED`; khác → no-op). TCP: `HANDLE_WEBHOOK {payload, signature}` (HMAC `SHIPPING_WEBHOOK_SECRET`, kiểm schema + `trackingCode` khớp; `CREATED` → `DELIVERED` + `ShipmentDelivered{deliveredAt}`; đã huỷ → no-op), `SIMULATE_DELIVERY {orderId}` (production → 404), `GET_SHIPMENT`. Hẹn giờ giao `SHIPPING_SIM_DELIVER_DELAY_MS>0` (đặt sau commit, mất khi restart); `SHIPPING_SIM_MODE=fail` để thử DLQ. Chưa kiểm chứng trên Postgres/Kafka thật.
+Sở hữu `shipments(orderId unique, status CREATED|DELIVERED|CANCELLED|FAILED, trackingCode, ...)`. Kafka `shipping-commands` (group `shipping-service`): `CreateShipment` (chưa có → carrier mô phỏng → `CREATED` + `ShipmentCreated{trackingCode}`; đã có → no-op; lỗi 3 lần → DLQ + TX riêng insert `FAILED` + `ShipmentFailed{reason}`), `CancelShipment` (khoá dòng `pessimistic_write`; `CREATED` → `CANCELLED`; khác → no-op). TCP: `HANDLE_WEBHOOK {payload, signature}` (HMAC `SHIPPING_WEBHOOK_SECRET`, kiểm schema + `trackingCode` khớp; `CREATED` → `DELIVERED` + `ShipmentDelivered{deliveredAt}`; đã huỷ → no-op), `SIMULATE_DELIVERY {orderId}` (production → 404), `GET_SHIPMENT`. Hẹn giờ giao `SHIPPING_SIM_DELIVER_DELAY_MS>0` (đặt sau commit, mất khi restart); `SHIPPING_SIM_MODE=fail` để thử DLQ. `eventId` của webhook phải là UUID, sai → 400 "Webhook eventId must be a UUID" (sửa sau E2E: trước đó lỗi cột `uuid` của Inbox gây 500 và carrier retry). Đã kiểm chứng: `shipping.int-spec.ts` 5/5; E-11 (carrier lỗi → DLQ → `ShipmentFailed` → hoàn tiền, trả kho) PASS trên stack thật.
 
 ---
 

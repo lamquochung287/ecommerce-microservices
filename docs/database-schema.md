@@ -2,7 +2,7 @@
 
 **Ngày cập nhật**: 2026-10-15
 **Nguồn**: entity TypeORM trong `apps/*/src/entities/` đối chiếu migration `libs/database/src/migrations/`. DB: PostgreSQL 15, database `ecommerce`, `synchronize:false`, migration chạy khi service khởi động.
-> **Trạng thái kiểm chứng**: schema dưới đây theo entity/migration sau cutover checkout v2. Các migration mới (`1791874600000` … `1791879000000`) **chưa được áp lên DB thật nào** trong lần cutover này (chỉ `AddKafkaOutboxAndInbox` đã chạy thử trên DB test ở nền tảng); cần chạy theo runbook trong báo cáo cutover.
+> **Trạng thái kiểm chứng** (2026-10-15): schema dưới đây theo entity/migration sau cutover checkout v2. Bảy migration checkout v2 (`1791874600000` … `1791879000000`) đã chạy trên DB test `ecommerce_test` (up/down/up, remap dữ liệu đúng) và trên DB dev `ecommerce` (đã backup trước). Int-spec các bảng mới pass trên Postgres thật. Chi tiết: [integration-test-report.md](../plans/261015-1700-checkout-v2-event-driven/reports/integration-test-report.md).
 
 > **Ghi chú đọc sơ đồ**
 > - Toàn bộ service dùng **chung 1 database**, nhưng mỗi bảng thuộc về **1 service sở hữu** (mục 1). Quan hệ giữa các service là **tham chiếu mềm bằng UUID** (không có FOREIGN KEY) — vẽ bằng nét đứt (`..`) ở sơ đồ tổng thể.
@@ -498,6 +498,7 @@ erDiagram
 - **Kiểu tiền**: `numeric(10,2)` (TypeORM trả string; code ép `Number()`). Trần ~99.999.999,99 — có thể không đủ cho VND giá trị lớn.
 - **Enum PostgreSQL**: `orders_status_enum` (9 trạng thái; migration chốt tạo lại enum, đổi cột sang `text` rồi ép về enum mới vì Postgres cấm dùng giá trị vừa `ADD VALUE` trong cùng transaction), `orders_refundstatus_enum`, `refunds_status_enum`, `outbox_status_enum`, `payment_transactions_status_enum`, `payment_refunds_status_enum`, `shipments_status_enum`, `reservations_status_enum`, `voucher_redemptions_status_enum`, `sent_notifications_channel_enum`, `sent_notifications_status_enum`, `vouchers_discounttype_enum`.
 - **Migration của luồng checkout v2** (thứ tự áp, mọi cái idempotent, có `down`): `1791874600000-AddKafkaOutboxAndInbox`, `1791874800000-AddOrderLifecycleColumns`, `1791875000000-AddInventoryTables`, `1791876000000-AddPaymentIntentAndRefund`, `1791877000000-AddShipments`, `1791878000000-AddVoucherRedemptions`, `1791879000000-FinalizeOrderStatusAndStockOwnership` (đơn `PENDING/PROCESSING` → `PENDING_PAYMENT` + `expiresAt = now()`; `DELIVERED` thiếu `deliveredAt` → `updatedAt`; bỏ cột `stock`; bỏ default `outbox.topic/source`).
+- **Cảnh báo phá huỷ**: `FinalizeOrderStatusAndStockOwnership` xoá cột `stock` của `products` và `product_variants` (sau khi bù dòng còn thiếu vào `stock_items`) và đổi enum `orders.status`. `down` không khôi phục trạng thái đơn đã chuyển. Service chạy `migrationsRun:true`, nên migration chạy ngay khi service khởi động: **backup DB trước** khi bật service trên dữ liệu có sẵn.
 - **Soft delete (`deletedAt`)**: `users`, `products`, `orders`, `product_variants`. Thực tế chỉ variant dùng `softRemove`; product bị `remove` (xoá cứng).
 - **Khoá chính**: `uuid` (`uuid_generate_v4()`), ngoại lệ `users.id` (serial) và bảng nối (PK ghép).
 - **Không database-per-service**: muốn tách DB về sau, mọi liên kết giữa các cụm ở mục 2 đã là tham chiếu mềm nên chỉ cần chuyển bảng theo cụm.

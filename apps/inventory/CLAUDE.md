@@ -40,7 +40,7 @@ Consumer group `inventory-service` nghe `inventory-commands` (`InventoryCommands
 
 ## Gotchas
 - Ràng buộc DB `CHECK (reserved >= 0 AND onHand >= reserved)` và unique `(productId, variantId) NULLS NOT DISTINCT` (PG15) chỉ có trong migration `AddInventoryTables`, không có trong entity.
-- Migration sao chép `stock` từ Product một lần (`ON CONFLICT DO NOTHING`); Product vẫn giữ cột `stock` của nó tới khi chuyển hẳn sang Inventory, nên tồn kho có hai nguồn trong giai đoạn chuyển tiếp. `scripts/seed.ts` đồng bộ lại `stock_items` sau khi seed.
+- Migration `AddInventoryTables` sao chép `stock` từ Product một lần (`ON CONFLICT DO NOTHING`). Migration `FinalizeOrderStatusAndStockOwnership` bù các dòng còn thiếu rồi xoá cột `stock` của `products` và `product_variants`. Từ đó `stock_items` là nguồn duy nhất của tồn kho. `scripts/seed.ts` ghi trực tiếp `stock_items` (chưa chạy lại sau cutover).
 - `expiresAt` dùng `timestamptz` và so sánh bằng tham số `Date` từ app (không dùng `now()` trong SQL) để không lệch múi giờ.
 - Lỗi nghiệp vụ là `RpcException({statusCode, message})`; `InventoryRpcExceptionFilter` xử lý phần còn lại.
 - Trạng thái `RESTOCKED` đã khai báo sẵn trong enum cho luồng nhập lại kho sau commit.

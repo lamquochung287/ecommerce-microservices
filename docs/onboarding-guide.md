@@ -1,7 +1,7 @@
 # Onboarding Guide — đọc tài liệu thế nào để nắm dự án
 
 **Ngày cập nhật**: 2026-10-15
-**Đối tượng**: developer/AI agent mới vào dự án. Mục tiêu: hiểu đủ để sửa code an toàn trong 1–2 giờ đọc, thay vì đọc hết 11 file.
+**Đối tượng**: developer/AI agent mới vào dự án. Mục tiêu: hiểu đủ để sửa code an toàn trong 1–2 giờ đọc, thay vì đọc hết 15 file trong `docs/`.
 
 ---
 
@@ -10,7 +10,7 @@
 | File | Trả lời câu hỏi | Độ sâu | Thời gian |
 |---|---|---|---|
 | [../README.md](../README.md) | Dự án là gì, chạy thế nào? | Tổng quan | 5' |
-| [../CLAUDE.md](../CLAUDE.md) (gốc) | Quy tắc bắt buộc + 10 điều cần nắm (§2.1) | Cô đọng | 5' |
+| [../CLAUDE.md](../CLAUDE.md) (gốc) | Quy tắc bắt buộc + 14 mục cần nắm (§2.1) | Cô đọng | 5' |
 | [project-overview-pdr.md](./project-overview-pdr.md) | Hệ thống phục vụ nghiệp vụ gì, phạm vi, mục tiêu? | Product | 10' |
 | [codebase-summary.md](./codebase-summary.md) | Thư mục nào chứa gì, port, stack? | Bản đồ code | 10' |
 | [system-architecture.md](./system-architecture.md) | Các service nối với nhau ra sao, observability? | Kiến trúc | 15' |
@@ -21,8 +21,9 @@
 | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) | Orchestration/Outbox-Inbox Kafka/locking chi tiết, sequence checkout v2 | Deep-dive | 15' |
 | [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) | Login, verify token, logout, RBAC | Deep-dive | 10' |
 | [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) | Middleware chain, envelope request/response | Deep-dive | 10' |
-| [target-checkout-architecture.md](./target-checkout-architecture.md) | Thiết kế checkout/fulfillment đã chốt (Kafka, Inventory, Shipping) + §10 trạng thái implement/kiểm chứng | Thiết kế + trạng thái | 15' |
-| [code-standards.md](./code-standards.md) | Viết code theo quy ước nào? CQRS structure | Quy ước | 15' |
+| [target-checkout-architecture.md](./target-checkout-architecture.md) | **Nguồn thiết kế** checkout v2 (đã chốt: Kafka, Inventory, Shipping, huỷ/hoàn); §10 trạng thái implement và kiểm chứng; §11 câu hỏi mở | Thiết kế + trạng thái | 15' |
+| [code-standards.md](./code-standards.md) | Viết code theo quy ước nào? CQRS, TCP/Kafka, test | Quy ước | 15' |
+| [load-testing-guide.md](./load-testing-guide.md) | Chạy k6, sizing VPS 4 vCPU/8 GB, đọc dashboard k6 và Infrastructure | Vận hành | 10' |
 | [project-roadmap.md](./project-roadmap.md) | Đã làm gì, còn gì, gap nào? | Kế hoạch | 10' |
 | `apps/<app>/CLAUDE.md` | Quy tắc + gotcha riêng của 1 service | Cô đọng | 3'/file |
 
@@ -47,7 +48,7 @@
 6. Trước khi merge: tra `design-trade-offs.md §5` xem thay đổi có đụng rủi ro đã biết không.
 
 ### C. "Tôi cần debug 1 lỗi"
-1. Xác định lỗi xảy ra ở tầng nào bằng *pipeline Gateway* (`module-processing-flows.md §1`): 401 (api-key/JWT) → 403 (bitmask) → 429 (throttle) → 400 (ValidationPipe) → 409 (idempotency/stock/unique) → 402 (payment) → 502/408 (breaker/timeout).
+1. Xác định lỗi xảy ra ở tầng nào bằng *pipeline Gateway* (`system-architecture-gateway-flow.md §1`): 401 (x-api-key, JWT) → 403 (bitmask) → 429 (throttle) → 400 (ValidationPipe, thiếu `x-idempotency-key`) → 409 (idempotency đang xử lý, hết hàng, lệch version) → 503 (Redis lỗi ở route checkout) → 504 (User timeout) → 502 (breaker mở, lỗi service) / 408 (service timeout).
 2. Bảng *mã lỗi* ở `business-flows.md §3` để biết rule nào sinh ra mã đó.
 3. Dò theo `x-request-id` (trả trong header + `meta.requestId`) trên Jaeger (`:16686`).
 4. Lỗi liên quan đơn hàng: `system-architecture-orders-flow.md` (orchestration, race, gap còn lại) và `module-processing-flows.md §4`. Event không tới: xem bảng `outbox` (`PENDING/FAILED`, cột `source`/`topic`), `processed_messages` và topic `<topic>.dlq`.
@@ -65,10 +66,10 @@ Chỉ cần nạp theo thứ tự: `CLAUDE.md` gốc → `apps/<service>/CLAUDE.
 ## 3. Cách đọc từng loại tài liệu
 
 - **Nhãn `[ĐÃ CÓ]` / `[CHƯA CÓ]`** (business-flows): phân biệt cái code đang làm với cái "lẽ ra phải có". Đừng giả định `[CHƯA CÓ]` đã tồn tại (ví dụ: refresh token, kiểm tra chủ sở hữu ở `GET /orders*`).
-- **Gap/Rủi ro (R1–R19)** (design-trade-offs §5): đây là sự thật đã xác minh với code tại ngày cập nhật, không phải ý tưởng. Khi bạn sửa xong 1 gap, **cập nhật bảng đó** và `project-roadmap.md`.
+- **Gap/Rủi ro (R1–R20)** (design-trade-offs §5): đây là sự thật đã xác minh với code tại ngày cập nhật, không phải ý tưởng. Khi bạn sửa xong 1 gap, **cập nhật bảng đó** và `project-roadmap.md`.
 - **Đường dẫn file trong ngoặc**: luôn là bằng chứng; nếu code đã đổi mà tài liệu lệch → tin code, sửa tài liệu.
 - **Sơ đồ ASCII**: chỉ đọc thứ tự bước và ranh giới transaction; chi tiết đúng-sai nằm ở text bên dưới.
-- **Ngày cập nhật** đầu mỗi file: file cũ hơn (2026-09-28: `code-standards`, `project-overview-pdr`, `gateway-flow`) có thể lệch nhẹ; ưu tiên các file đã cập nhật 2026-10-15 (nghiệp vụ, kiến trúc, schema, trade-offs) khi mâu thuẫn.
+- **Ngày cập nhật** đầu mỗi file: sau đợt rà soát 2026-10-15, các file chính đều ghi ngày này. Nếu thấy file nào ghi ngày cũ hơn và mâu thuẫn với code, tin code và sửa file đó.
 
 ### Thuật ngữ cần biết trước khi đọc
 | Thuật ngữ | Nghĩa trong dự án |
@@ -104,19 +105,26 @@ Một request xuyên hệ thống — đọc theo chiều đi của nó:
 
 ```bash
 npm install
-npm run docker:up        # postgres, redis, kafka, jaeger, prometheus, grafana, minio + exporter postgres/redis/kafka
+npm run docker:up        # postgres, redis, kafka (KRaft), jaeger, prometheus, grafana, minio + exporter postgres/redis/kafka
 # tạo .env (bắt buộc: DB_*, REDIS_*, JWT_*, API_KEY, KAFKA_BROKERS=localhost:9092,
-#   PAYMENT_WEBHOOK_SECRET, SHIPPING_WEBHOOK_SECRET — xem libs/common/src/utils/env-validation.ts;
-#   thiếu một biến thì mọi service không khởi động)
-npm run start:all        # 9 microservice + gateway (migration tự chạy)
-npm run seed             # dữ liệu mẫu, mật khẩu Password123 (scripts/seeded-users.csv)
+#   PAYMENT_WEBHOOK_SECRET, SHIPPING_WEBHOOK_SECRET — danh sách đầy đủ: libs/common/src/utils/env-validation.ts;
+#   thiếu một biến thì mọi service không khởi động. Repo không có .env.example)
+# BACKUP DB trước khi bật service nếu DB đã có dữ liệu (xem cảnh báo dưới)
+npm run start:all        # 9 microservice + gateway (migration tự chạy khi service khởi động)
+npm run seed             # dữ liệu lớn, mật khẩu Password123 (scripts/seeded-users.csv)
 ```
 
+> **Cảnh báo migration**: 7 migration checkout v2 (`1791874600000` … `1791879000000`) chạy tự động và **không thể hoàn nguyên đầy đủ**. `FinalizeOrderStatusAndStockOwnership` xoá cột `stock` của `products` và `product_variants` và đổi enum trạng thái đơn (`PENDING`/`PROCESSING` → `PENDING_PAYMENT`, huỷ ngay). `down` không khôi phục trạng thái đơn. Trên DB có dữ liệu thật: `pg_dump` (custom format) ra ngoài repo trước, rồi mới bật service.
+>
+> **Seed**: `scripts/seed.ts` ghi thẳng vào DB `ecommerce` (đường dẫn cứng). Chưa chạy lại sau cutover.
+
 - Swagger: `http://localhost:3000/api/docs` · Jaeger `:16686` · Prometheus `:9090` · Grafana `:3100` (admin/admin) · MinIO console `:9001`.
+- Dashboard Grafana (thư mục `grafana/dashboards/`): `Ecommerce - Server Overview`, `Ecommerce - Infrastructure` (Overview, Pipeline nghiệp vụ, PostgreSQL, Redis, Kafka), `k6 Load Test`.
+- Gateway có thể chạy cổng khác 3000 bằng `GATEWAY_PORT`. Khi đó đặt `PUBLIC_API_BASE_URL` để `payment_url` trỏ đúng cổng (mặc định `http://localhost:3000`).
 - Gọi API mẫu: `http/api-tests.http` hoặc `http/ecommerce.postman_collection.json`. **Mọi request cần header `x-api-key`**, route bảo vệ cần `Authorization: Bearer`.
 - User mới đăng ký có `permissions=0` — gán role qua `POST /roles/assign` (hoặc dùng user từ seed) trước khi gọi API cần quyền.
 
-> Stack checkout v2 **chưa được chạy thật** trong lần cutover; nếu gặp lỗi khi chạy lần đầu, đối chiếu runbook trong `plans/261015-1700-checkout-v2-event-driven/reports/phase-14-report.md`. Muốn thấy đơn đi hết luồng nhanh: đặt `PAYMENT_SIM_MODE=auto-success`.
+> Checkout v2 đã chạy E2E trên stack thật (E-01…E-13, xem `plans/261015-1700-checkout-v2-event-driven/reports/e2e-test-report.md`). Khi gặp lỗi, đối chiếu mục 3 "Bug thật tìm được và đã sửa" trong báo cáo đó (bug đã sửa: webhook eventId không phải UUID, Notification thiếu `Transport.TCP`, breaker mở vì lỗi 4xx). Muốn thấy đơn đi hết luồng nhanh: đặt `PAYMENT_SIM_MODE=auto-success`.
 
 **Thử nghiệm giúp hiểu nhanh**
 1. Thêm vài món vào cart → `POST /cart/checkout` (bắt buộc `x-idempotency-key`) → nhận `PENDING_PAYMENT` + `payment_url`; `stock_items.reserved` tăng, cart giữ nguyên.
@@ -136,7 +144,7 @@ Bạn đủ sẵn sàng khi trả lời được, không cần mở tài liệu:
 - [ ] Outbox + Inbox đảm bảo điều gì (at-least-once, idempotent) và **không** đảm bảo điều gì (exactly-once)?
 - [ ] Khi thanh toán tới muộn vào đơn đã huỷ thì chuyện gì xảy ra?
 - [ ] Quyền bitmask kiểm tra thế nào; vì sao user mới chưa gọi được API?
-- [ ] Rủi ro bảo mật cao còn lại (R2–R3: thiếu kiểm tra chủ sở hữu) và các rủi ro vận hành mới (R16–R19)?
+- [ ] Rủi ro bảo mật cao còn lại (R2–R3: thiếu kiểm tra chủ sở hữu) và các rủi ro vận hành mới (R16–R20, gồm F1 mất message khi consumer down)?
 - [ ] Service nào dùng CQRS, service nào không, và vì sao?
 
 ---
@@ -146,4 +154,4 @@ Bạn đủ sẵn sàng khi trả lời được, không cần mở tài liệu:
 - Đổi hành vi nghiệp vụ → sửa `business-flows.md` + `module-processing-flows.md` + `CLAUDE.md` của app + (nếu đóng/mở rủi ro) `design-trade-offs.md §5` và `project-roadmap.md`.
 - Thêm service/lib → cập nhật `CLAUDE.md` gốc (§2) và `codebase-summary.md`.
 - Mỗi file giữ dưới 800 dòng; tách file con nếu vượt.
-- Kiểm tra: `node .claude/scripts/validate-docs.cjs docs/` (cảnh báo "code reference/config key" phần lớn là báo nhầm, link nội bộ hỏng mới đáng lo).
+- Kiểm tra: `node .claude/scripts/validate-docs.cjs docs/` (cảnh báo "code reference/config key" phần lớn là báo nhầm, link nội bộ hỏng mới đáng lo). Lưu ý: khi kiểm tra ngày 2026-10-15 lệnh này đã treo, nên kiểm link tương đối bằng script riêng.

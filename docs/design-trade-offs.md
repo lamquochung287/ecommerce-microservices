@@ -1,7 +1,7 @@
 # Design Decisions & Trade-offs
 
 **Ngày cập nhật**: 2026-10-15
-**Phạm vi**: các quyết định kiến trúc/nghiệp vụ đang có trong code (sau cutover checkout v2), cái được – cái mất, khi nào cần đổi. Phần chưa chạy trên Postgres/Kafka thật được ghi rõ. Mọi nhận định "đã xác minh" đều đối chiếu code (đường dẫn trong ngoặc).
+**Phạm vi**: các quyết định kiến trúc/nghiệp vụ đang có trong code (sau cutover checkout v2), cái được – cái mất, khi nào cần đổi. **Trạng thái kiểm chứng (2026-10-15)**: migration và 33/33 int-spec pass trên Postgres + Kafka thật; E2E E-01…E-13 PASS; chưa chạy E-14 (Kafka tắt) và k6 sau cutover. Mọi nhận định "đã xác minh" đều đối chiếu code (đường dẫn trong ngoặc).
 
 Xem luồng: [business-flows.md](./business-flows.md), [module-processing-flows.md](./module-processing-flows.md).
 
@@ -17,7 +17,7 @@ Xem luồng: [business-flows.md](./business-flows.md), [module-processing-flows.
 | Latency RPC thấp cho đường cần trả lời ngay (reserve, validate, check) vẫn qua TCP | Hai transport trong cùng app hybrid: phải gắn `Transport.TCP`/`Transport.KAFKA` tường minh cho mọi handler (nếu không, `{"cmd":...}` bị coi là tên topic) |
 
 **Giữ nguyên**: Gateway→service và service→service RPC là TCP point-to-point, coupling thời gian vẫn còn ở đường đồng bộ (Orders↔Inventory/Payment/Product/Promotion khi checkout, Review→Orders, Notification→User) và host vẫn hardcode `localhost`.
-**Chưa kiểm chứng trên stack thật**: relay→broker→consumer đã có int-spec ở nền tảng (đã chạy), nhưng luồng nhiều service qua Kafka mới chỉ có unit test (mock) và build.
+**Đã kiểm chứng trên stack thật**: relay→broker→consumer có int-spec chạy trên Kafka thật, và luồng nhiều service qua Kafka (checkout → thanh toán → kho → vận chuyển → giao hàng) chạy đúng ở E2E E-01…E-13. Chưa kiểm chứng: E-14 (Kafka tắt 30 giây, outbox giữ PENDING rồi publish lại).
 
 ### 1.2 Gateway là entry duy nhất, auth tập trung qua User service
 - **Được**: service nội bộ không phải tự xác thực; revoke tức thì (xoá key Redis); quyền luôn mới nhất.
@@ -55,8 +55,8 @@ Xem luồng: [business-flows.md](./business-flows.md), [module-processing-flows.
 ### 2.2 Reserve → commit/release thay cho trừ kho ngay
 - **Được**: đơn bỏ dở không làm mất kho (TTL 15', `replaces` giải phóng đơn cũ trong cùng transaction); `reserve` atomic toàn bộ món; khoá theo thứ tự id (`ORDER BY id FOR UPDATE`) nên không deadlock; CHECK `reserved >= 0 AND onHand >= reserved` là lớp chặn cuối cùng ở DB.
 - **Mất**: thêm dịch vụ (Inventory) + một lần gọi TCP đồng bộ trong checkout; thêm bảng `reservations` và job hết hạn; `Product` không còn biết tồn kho (catalog phải ghép qua Gateway, Inventory chậm → `UNKNOWN`).
-- Sản phẩm tạo mới chưa có `stock_items` cho tới khi `ADJUST_STOCK` lần đầu (available = 0).
-- **Chưa kiểm chứng trên Postgres thật**: SQL `unnest` với mảng chứa NULL, `FOR UPDATE OF s` + JOIN, `ON CONFLICT` với unique NULLS NOT DISTINCT.
+- Sản phẩm tạo mới chưa có `stock_items` cho tới lần điều chỉnh tồn kho đầu tiên qua Inventory (`ADJUST_STOCK`); trước đó available = 0.
+- **Đã kiểm chứng trên Postgres thật** (int-spec pass): SQL `unnest` với mảng, `FOR UPDATE OF s` + JOIN, `ON CONFLICT` với unique NULLS NOT DISTINCT, reserve song song không deadlock.
 
 ### 2.3 Khoá lạc quan trên Order (`UPDATE ... WHERE version`)
 - **Được**: bên thua race (huỷ vs `ShipmentCreated`, `PaymentSucceeded` vs scheduler) luôn biết để đọc lại state; không giữ lock DB lâu; user nhận 409 rõ ràng, consumer retry tự nhiên.
@@ -69,7 +69,7 @@ Xem luồng: [business-flows.md](./business-flows.md), [module-processing-flows.
   - At-least-once chứ không exactly-once: consumer phải idempotent (đã làm bằng Inbox + trạng thái); side effect ngoài DB (email) có thể trùng khi commit lỗi sau khi gửi.
   - Relay poll theo `OUTBOX_RELAY_INTERVAL_MS` → latency vài trăm ms–giây; thứ tự chỉ đảm bảo theo key `orderId` (partition).
   - `FAILED` sau `OUTBOX_MAX_RETRY` chỉ có metric `outbox_failed_total`, chưa có alert rule/replay tool; DLQ chưa có công cụ replay.
-  - Consumer `fromBeginning:false`: message phát trước khi group join lần đầu bị bỏ → phải khởi động consumer trước producer.
+  - Consumer `fromBeginning:false`: message phát khi consumer đang down có thể bị bỏ, kể cả khi group đã tồn tại. Điều kiện: partition chưa có offset đã commit của group. Đã tái hiện ở E2E (Shipping tắt → checkout + thanh toán → đơn kẹt `FULFILLING`, không có vận đơn sau khi bật lại). Đây là lỗi F1 (xem §5 R20). Phải khởi động consumer trước khi producer phát event.
   - Producer kết nối lười (Kafka tắt lúc boot không làm sập relay) nhưng `ensureKafkaTopics` làm consumer exit 1 nếu broker tắt lúc khởi động.
 
 ### 2.5 Payment bất đồng bộ qua intent + webhook
@@ -143,7 +143,8 @@ Mức độ: **CAO** = ảnh hưởng tiền/dữ liệu/bảo mật; **TB**; **
 | R16 | Crash giữa `RESERVE_VOUCHER` và TX tạo đơn làm kẹt lượt voucher; `Inventory.RESERVE` trả phần đơn `replaces` trước khi biết TX có thành công | TB | `checkout.handler.ts` (§2.1) | Job quét redemption `RESERVED` mồ côi; khôi phục reservation của đơn cũ khi TX lỗi |
 | R17 | Timer simulator (Payment auto, Shipping giao hàng) mất khi restart | THẤP | `payment-auto-simulator.service.ts`, `delivery-timer.service.ts` | Chỉ cho dev; tắt khi `NODE_ENV=production` |
 | R18 | Hoàn tiền `FAILED` không retry được; hoàn hàng gặp `PaymentRefundFailed` kẹt `REFUNDING` | TB | `refund-payment.handler.ts`, `handle-payment-event.handler.ts` | Endpoint admin retry/xử lý tay |
-| R19 | Đơn `PROCESSING` cũ (đã thu tiền) bị migration chuyển `PENDING_PAYMENT` và huỷ **không hoàn tiền** khi cutover | TB (nếu có dữ liệu thật) | `FinalizeOrderStatusAndStockOwnership` | Chỉ chấp nhận cho dữ liệu seed; với dữ liệu thật cần phương án riêng |
+| R19 | Đơn `PROCESSING` cũ (đã thu tiền) bị migration chuyển `PENDING_PAYMENT` và huỷ **không hoàn tiền** khi cutover. Trên DB dev các đơn này đã bị huỷ hết (5.415 đơn; tổng `CANCELLED` 7.757, không còn `PENDING_PAYMENT`) | TB (nếu có dữ liệu thật) | `FinalizeOrderStatusAndStockOwnership`; DB dev | Chỉ chấp nhận cho dữ liệu dev; với dữ liệu thật cần phương án riêng (hoàn tiền hoặc chuyển `PAID` + reservation `COMMITTED`) |
+| R20 (F1) | Consumer `fromBeginning:false`: message phát khi service đang down có thể bị bỏ (partition chưa có offset commit). Đơn kẹt `FULFILLING` không có vận đơn, không có job reconcile. Đã tái hiện ở E2E | CAO | `libs/messaging/src/kafka/kafka-config.ts` (`subscribe: { fromBeginning: false }`); `e2e-test-report.md` §4 | (a) `fromBeginning: true` cho topic command, phải kiểm lại từng handler có idempotent; (b) đặt offset ban đầu khi tạo group; (c) job reconcile đơn `FULFILLING` không có shipment. Chưa có test tự động |
 
 > Các mục R1–R3 nên xử lý **trước** khi mở ra ngoài môi trường dev (đều liên quan phân quyền theo chủ sở hữu, hiện hoàn toàn chỉ có phân quyền theo module/action).
 
@@ -158,9 +159,9 @@ Mức độ: **CAO** = ảnh hưởng tiền/dữ liệu/bảo mật; **TB**; **
 | `getReviewsByProduct` | Không phân trang, không tổng hợp rating | Cần aggregate + cache |
 | Auth per request | 1 TCP + Redis + DB | Cache ngắn hạn tại Gateway (§1.2) |
 | Outbox relay | Poll theo interval, `SKIP LOCKED`, index `(status, source, seq)` | Latency vài trăm ms–giây; NOTIFY/LISTEN nếu cần thấp hơn |
-| Load test | k6 `checkout` đã đổi sang body checkout v2 (`x-idempotency-key`); chưa chạy lại sau cutover | Cần stack có Kafka + `PAYMENT_SIM_MODE=auto-success`; đơn k6 không thanh toán sẽ hết hạn sau 15' và trả kho |
-| Observability | Tracing + Prometheus + Grafana đã nối; counter `outbox_failed_total{source}` | Chưa có alert rule (outbox FAILED, DLQ, consumer lag, breaker open); dashboard Infrastructure mới chỉ để xem, chưa kiểm chứng trên stack thật |
-| Test | Unit test (mock) đã phủ phần lớn handler mới; int-spec (`npm run test:int`) viết sẵn cho race/lock/SKIP LOCKED | **Chưa chạy** int-spec và e2e trên stack thật tại thời điểm cutover; 2 spec cũ của User (`role.service`, `address.service`) vẫn cần Postgres; `gateway.controller.spec.ts` boilerplate đang fail |
+| Load test | k6 `checkout` đã đổi sang body checkout v2 (`x-idempotency-key`); **chưa có số đo sau cutover** | Compose loadtest đặt `PAYMENT_SIM_MODE=manual` (k6 tự thanh toán qua simulator) và `NODE_ENV=development`. Đơn không thanh toán hết hạn sau `ORDER_PAYMENT_TTL_SECONDS` và trả kho |
+| Observability | Tracing + Prometheus (10 job `ecommerce-*` + 3 exporter `infra-*`) + Grafana (3 dashboard). Counter `outbox_failed_total{source}` | Chưa có alert rule (outbox FAILED, DLQ, consumer lag, breaker open). Metric PostgreSQL và truy vấn tuỳ biến `monitoring/postgres-queries.yaml` chưa kiểm trên exporter chạy thật |
+| Test | Unit test (mock): 61 suite, 532 test pass. Int-spec (`npm run test:int`): 10 suite, 33 test pass trên Postgres + Kafka thật | 2 spec cũ của User (`role.service`, `address.service`) cần Postgres dev; `gateway.controller.spec.ts` và `user.controller.spec.ts` là boilerplate đang fail; E2E là runbook thủ công |
 | Scale ngang | Outbox `SKIP LOCKED`, scheduler an toàn nhờ optimistic lock, host `localhost` | Cần cấu hình host/broker khi tách container |
 
 ---
@@ -177,6 +178,8 @@ Mức độ: **CAO** = ảnh hưởng tiền/dữ liệu/bảo mật; **TB**; **
 5. Ownership/ABAC: bổ sung kiểm tra chủ sở hữu cho `GET /orders*`, addresses ở Gateway hay trong từng service?
 6. Endpoint refresh token / role mặc định khi register?
 7. Chạy nhiều instance/container: cấu hình host/broker, HA Kafka, công cụ replay DLQ.
+8. **F1 (cần chọn trước khi chạy production)**: xử lý message bị bỏ khi consumer down: (a) `fromBeginning: true` cho topic command, (b) đặt offset ban đầu khi tạo group, hay (c) job reconcile đơn kẹt `FULFILLING`. Hiện chưa có lựa chọn nào được chốt.
+9. Huỷ đúng lúc thanh toán (E2E H3): đơn huỷ `USER` trước khi Orders nhận `PaymentSucceeded`, thanh toán đến sau → hoàn đủ (gồm phí ship). Có chấp nhận không?
 
 ---
 

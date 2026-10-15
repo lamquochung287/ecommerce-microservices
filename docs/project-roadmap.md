@@ -1,7 +1,7 @@
 # Project Roadmap
 
 **Ngày cập nhật**: 2026-10-15
-**Trạng thái**: Early-stage, Phase 0-2 đã hoàn thành, **Checkout v2 (event-driven) đã cutover — code + unit test + build xong, chưa kiểm chứng trên stack thật**, Phase 3 đang lên kế hoạch
+**Trạng thái**: Early-stage, Phase 0-2 đã hoàn thành, **Checkout v2 (event-driven) đã cutover và kiểm chứng trên stack thật một phần** (migration, 33/33 int-spec, E2E E-01…E-13 PASS; còn E-14, k6), Phase 3 đang lên kế hoạch
 
 ---
 
@@ -16,7 +16,7 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 | **Phase 0: Foundations** | ✅ XONG | Health check, graceful shutdown, DB migrations, idempotency, outbox pattern |
 | **Phase 1: Core Domain** | ✅ XONG | User auth (JWT+bcrypt), Product catalog (CQRS), Cart, Saga checkout, Inventory management, RBAC (bitmask), Address book |
 | **Phase 2: Ecosystem** | ✅ XONG | Payment (simulate), Notification (email scaffold), Review kèm purchase verification, Promotion (voucher có locking), Media (MinIO) |
-| **Checkout v2 (event-driven)** | ✅ Code xong (2026-10-15), ⚠️ chưa kiểm chứng trên stack thật | Kafka + Outbox/Inbox, Inventory (reserve/commit/release), Payment intent + webhook + refund, Shipping, Voucher nối checkout, huỷ/hoàn hàng, scheduler, Gateway checkout chọn món + idempotency bắt buộc + simulator; Saga cũ đã xoá. Xem [target-checkout-architecture.md §10](./target-checkout-architecture.md) |
+| **Checkout v2 (event-driven)** | ✅ Code xong; ✅ kiểm chứng DB/Kafka thật (E-01…E-13); ⏳ E-14, k6 | Kafka + Outbox/Inbox, Inventory (reserve/commit/release), Payment intent + webhook + refund, Shipping, Voucher nối checkout, huỷ/hoàn hàng, scheduler, Gateway checkout chọn món + idempotency bắt buộc + simulator; Saga cũ đã xoá. Xem [target-checkout-architecture.md §10](./target-checkout-architecture.md) |
 | **Phase 3: Production Hardening** | 🔄 TODO | Hoàn thiện observability, API docs, security audit, real payment/email provider, search indexing |
 
 ---
@@ -33,10 +33,10 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 - ✅ Health check endpoint (`GET /health` kèm status check)
 - ✅ Graceful shutdown (SIGTERM → chờ request đang xử lý → đóng kết nối)
 - ✅ Hỗ trợ idempotency (header x-idempotency-key, lưu Redis, TTL 24h)
-- ✅ Scaffold outbox pattern (entity Order+Outbox, worker @Cron)
+- ✅ Scaffold outbox pattern (ban đầu là worker @Cron at-most-once; đã thay bằng relay Kafka at-least-once ở checkout v2)
 - ✅ Exception filter (base `AbstractRpcExceptionFilter` + subclass riêng từng service)
 - ✅ Setup tracing (tích hợp OpenTelemetry + Jaeger)
-- ✅ Docker Compose (Postgres, Redis, Jaeger, Prometheus, Grafana, MinIO)
+- ✅ Docker Compose (Postgres, Redis, Kafka KRaft, Jaeger, Prometheus, Grafana, MinIO, exporter postgres/redis/kafka)
 
 **Tham khảo**: `plans/260925-1612-production-readiness-roadmap/phase-00-foundations-reliability.md`
 
@@ -58,11 +58,11 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 - **Ghi chú**: Không dùng CQRS (chủ ý giữ đơn giản dạng CRUD)
 
 #### Product Service
-- ✅ CRUD Product (name, price, stock, images dạng JSONB)
+- ✅ CRUD Product (name, price, images dạng JSONB; tồn kho đã chuyển sang Inventory)
 - ✅ Quản lý Category & Brand
-- ✅ Product variant (sku, price, stock riêng từng variant)
+- ✅ Product variant (sku, price riêng từng variant)
 - ✅ Attribute & attribute value
-- ✅ Optimistic locking khi adjust stock (`@VersionColumn` kèm retry)
+- ✅ ~~Optimistic locking khi adjust stock~~ → chuyển sang Inventory (`stock_items`, khoá `ORDER BY id FOR UPDATE`) và Order (`version`)
 - ✅ Implement đầy đủ CQRS (commands/queries/handlers/events)
 - **Gap**: Chưa có Redis caching (mọi read đều hit thẳng Postgres) — roadmap item
 
@@ -121,7 +121,7 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 
 ---
 
-### Checkout v2 — Event-driven (cutover 2026-10-15) ✅ code / ⚠️ chưa kiểm chứng thật
+### Checkout v2 — Event-driven (cutover 2026-10-15) ✅ code / ✅ kiểm chứng một phần trên stack thật
 
 **Mục tiêu**: thay Saga đồng bộ bằng orchestration event-driven (thiết kế: [target-checkout-architecture.md](./target-checkout-architecture.md); plan + báo cáo từng phase: `plans/261015-1700-checkout-v2-event-driven/`).
 
@@ -135,7 +135,9 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 - ✅ Gateway: checkout chọn món, idempotency bắt buộc (fail-closed), `GET /orders/:id/pay`, huỷ/hoàn, simulator, catalog ghép tồn kho
 - ✅ Cutover: xoá Saga cũ (`CreateOrderHandler`, `saga/`, `CHARGE_PAYMENT`, `ADJUST_STOCK` của Product, `POST /orders`, `PATCH /orders/:id/status`, `/refunds*`), migration chốt, cập nhật seed/loadtest/http/docs
 
-**Việc còn lại (cần được phép chạy DB/Kafka)**: tạo DB sạch → `loadtest/migrate.js` → seed → `npm run test:int` → khởi động 10 app → chạy e2e E-01…E-14 (`plans/261015-1700-checkout-v2-event-driven/test-cases.md`) → k6. Xem runbook trong `plans/261015-1700-checkout-v2-event-driven/reports/phase-14-report.md`.
+**Đã làm trên stack thật**: migration (DB test up/down/up; DB dev đã áp), 33/33 int-spec, E2E E-01…E-13 (kết quả và bug đã sửa: `reports/e2e-test-report.md`).
+
+**Việc còn lại**: chạy E-14 (tắt Kafka 30 giây, cần đồng ý vì Kafka dùng chung); k6 và lưu số đo; seed lại (`scripts/seed.ts` đang trỏ cứng DB `ecommerce`); chọn phương án cho F1 (message bị bỏ khi consumer down, [design-trade-offs §5 R20](./design-trade-offs.md)).
 
 ---
 
@@ -148,7 +150,7 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 #### Observability (đã wiring, config chưa đầy đủ)
 - 🔄 Capture đầy đủ trace Jaeger (đã gọi `setupTracing` nhưng chưa trace hết mọi tương tác)
 - 🔄 Expose Prometheus metrics từng service (đã cấu hình port nhưng chưa expose hết metrics)
-- 🔄 Grafana dashboard (hạ tầng đã sẵn sàng, dashboard chưa điền đầy đủ)
+- 🔄 Grafana dashboard: đã có 3 dashboard (Server Overview, Infrastructure, k6). Metric PostgreSQL và truy vấn tuỳ biến chưa kiểm trên exporter thật
 - 🔄 Tập trung log (tuỳ chọn Loki qua Grafana)
 - 🔄 Alert rule (tuỳ chọn Prometheus + Grafana alerting)
 
@@ -168,9 +170,9 @@ Hệ thống ecommerce microservices đang ở giai đoạn **early-stage develo
 
 #### Testing & Quality
 - 🔄 Audit test coverage (mục tiêu 70% cho code mới, chưa có report coverage)
-- 🔄 Bộ test E2E (đã có framework, test chưa đầy đủ)
-- 🔄 Load testing (chưa có bộ load test)
-- 🔄 Chaos engineering / test failure scenario (đã có test cho Saga, chưa test resilience rộng hơn)
+- 🔄 Bộ test E2E: runbook thủ công E-01…E-13 đã PASS trên stack thật; E-14 (Kafka outage) chưa chạy; chưa tự động hoá
+- 🔄 Load testing: kịch bản k6 và compose giới hạn 4 vCPU / 8 GB đã có; chưa có số đo sau cutover
+- 🔄 Chaos engineering / test failure scenario (chưa có test Kafka outage; resilience rộng hơn chưa làm)
 
 #### Tích hợp Provider thật
 - 🔄 Payment: vnpay/momo (đã có scaffold, chọn qua env, chưa test end-to-end)
@@ -198,8 +200,9 @@ Chi tiết bằng chứng/đề xuất: [design-trade-offs.md §5](./design-trad
 |-----|--------|----------|-------|
 | ~~Tin `unitPrice` + `userId` từ client ở `POST /orders`~~ | **Đã đóng** (route xoá; giá/số lượng server-side) | — | R1 |
 | Thiếu kiểm tra chủ sở hữu (`GET /orders*`, `GET /orders/:id/refunds`, addresses) | Đọc/sửa dữ liệu của user khác; `GET /orders` không `userId` trả mọi đơn | CAO | Mới có phân quyền theo module/action (R2, R3); `/orders/:id/pay\|cancel\|return` đã kiểm tra |
-| ~~Saga không có state bền~~ / ~~Webhook chưa cập nhật Order~~ / ~~Outbox at-most-once~~ | **Đã đóng** bằng orchestration + outbox/inbox Kafka; cần kiểm chứng trên stack thật | — | §2.1, §2.4 trade-offs |
-| Checkout v2 chưa kiểm chứng trên Postgres/Kafka thật | Migration, SQL raw (replaces, refunds), unnest/NULLS NOT DISTINCT, relay→consumer chưa chạy | CAO | Chạy runbook cutover |
+| ~~Saga không có state bền~~ / ~~Webhook chưa cập nhật Order~~ / ~~Outbox at-most-once~~ | **Đã đóng** bằng orchestration + outbox/inbox Kafka; đã kiểm chứng E2E | — | §2.1, §2.4 trade-offs |
+| F1: consumer `fromBeginning:false` làm mất message khi service down; đơn kẹt `FULFILLING` | Đã tái hiện trên stack thật; chưa có reconcile | CAO | Chọn phương án (trade-offs §7, mục 8) |
+| Checkout v2 chưa kiểm: E-14 (Kafka outage), k6 sau cutover, seed | Outbox giữ PENDING khi broker tắt chưa được chứng minh; chưa có số tải | TRUNG BÌNH | Chạy E-14 (cần đồng ý) và k6 |
 | Crash giữa `RESERVE_VOUCHER` và TX tạo đơn; `replaces` mất reservation khi TX lỗi | Kẹt lượt voucher / link thanh toán chết | TRUNG BÌNH | R16 |
 | Hoàn tiền `FAILED` không retry; hoàn hàng gặp `PaymentRefundFailed` kẹt `REFUNDING` | Cần admin xử lý tay | TRUNG BÌNH | R18 |
 | Idempotency Gateway get-then-set không nguyên tử | Hai request đồng thời cùng key có thể cùng lọt | TRUNG BÌNH | R8; thêm `SET NX` vào `libs/cached` |
@@ -224,9 +227,9 @@ Chi tiết bằng chứng/đề xuất: [design-trade-offs.md §5](./design-trad
 
 | Mục | Vị trí | Hành động |
 |------|----------|--------|
-| Hằng số CMD cũ | libs/common/src/constant/cmd.ts | Xoá (đã được thay bằng libs/constant/message-pattern.constant.ts) |
-| Dependency RabbitMQ | package.json | Xoá amqp-connection-manager, amqplib (đã deprecated hoàn toàn; kênh bất đồng bộ nay là Kafka) |
-| `gateway.controller.spec.ts` | apps/gateway/src | Boilerplate đang fail (thiếu provider `USER_SERVICE`): sửa hoặc xoá |
+| Hằng số CMD cũ | libs/common/src/constant/cmd.ts | Vẫn được User và Notification dùng (`CMD.GET_USER_INFO`). Chuyển sang `USER_MESSAGE_PATTERN` rồi xoá |
+| Dependency RabbitMQ | package.json | Gỡ amqp-connection-manager, amqplib (không còn import nào; kênh bất đồng bộ là Kafka) |
+| `gateway.controller.spec.ts`, `user.controller.spec.ts` | apps/gateway/src, apps/user/src | Boilerplate đang fail (thiếu provider `USER_SERVICE`; parse error): sửa hoặc xoá |
 | Cột `refunds.status` APPROVED/REJECTED | apps/orders entity | Không còn code ghi; cân nhắc gỡ khỏi enum |
 
 ---
@@ -269,14 +272,14 @@ Không có vấn đề backward compatibility; các phase sau đều dựa trên
 | Quyết định | Lý do | Trạng thái |
 |----------|-----------|--------|
 | ~~Không dùng RabbitMQ / không broker~~ | TCP point-to-point đủ dùng lúc đầu | ⛔ **Đã đảo 2026-10-15**: thêm Kafka cho event/command (RabbitMQ vẫn không dùng) |
-| **Transactional Outbox** | Ghi event cùng transaction với đổi trạng thái order; nay relay Kafka at-least-once + Inbox (xem trade-offs §2.4) | ✅ Đã implement (kiểm chứng thật: chưa) |
+| **Transactional Outbox** | Ghi event cùng transaction với đổi trạng thái order; nay relay Kafka at-least-once + Inbox (xem trade-offs §2.4) | ✅ Đã implement (int-spec relay và producer pass trên Kafka thật; E2E PASS) |
 | **Simulate trước, thật sau** | Học pattern mà không vướng tài khoản bên thứ 3; provider qua DI token (hiện bind cứng Simulated, chưa chọn theo env) | ✅ Đã implement (phần chọn theo env: TODO) |
 | **RBAC dạng bitmask** | Check permission hiệu quả bằng phép toán bit | ✅ Đã implement |
 | **Optimistic locking** | Nay áp dụng ở **Order** (`UPDATE ... WHERE version`); Product không còn trừ kho | ✅ Đã implement |
 | **Pessimistic locking (Promotion)** | Quan trọng: tránh voucher dùng vượt giới hạn; thời gian lock ngắn nên chấp nhận được | ✅ Đã implement |
 | **Không dùng SMS OTP** | Email OTP đã đủ; SMS tốn thêm chi phí/độ phức tạp | ✅ Đã quyết định, dùng Email |
 
-### Quyết định đã chốt 2026-10-15 (checkout v2 — đã implement, chưa kiểm chứng thật)
+### Quyết định đã chốt 2026-10-15 (checkout v2 — đã implement; kiểm chứng một phần)
 
 Chi tiết: [target-checkout-architecture.md](./target-checkout-architecture.md).
 
@@ -288,7 +291,7 @@ Chi tiết: [target-checkout-architecture.md](./target-checkout-architecture.md)
 | **State machine mới** PENDING_PAYMENT→PAID→FULFILLING→SHIPPED→DELIVERED→COMPLETED (+REFUNDING→REFUNDED) | Khớp luồng orchestrated | ✅ Đã implement + migration chốt |
 | **Chỉ Simulated cho Payment/Shipping** (không tích hợp ngoài), nhưng đi qua intent + webhook HMAC thật; hoãn vnpay/momo | Học pattern không vướng tài khoản bên thứ 3 | ✅ Đã implement |
 | **Payment async** (`createIntent` + webhook), nối Voucher, job hết hạn/auto COMPLETED | Loại bỏ cửa sổ lỗi charge-timeout/đơn kẹt PENDING | ✅ Đã implement |
-| **Cutover một lần, không feature flag**; xoá Saga cũ; `PENDING/PROCESSING` → `PENDING_PAYMENT` (huỷ ngay, chấp nhận vì chỉ có dữ liệu seed) | Giảm độ phức tạp song song hai luồng | ✅ Đã thực hiện ở mức code; migration chưa chạy |
+| **Cutover một lần, không feature flag**; xoá Saga cũ; `PENDING/PROCESSING` → `PENDING_PAYMENT` (huỷ ngay, chấp nhận vì chỉ có dữ liệu seed) | Giảm độ phức tạp song song hai luồng | ✅ Đã thực hiện; migration đã chạy trên DB test và dev |
 | **Giữ `/vouchers/apply`; xoá `POST /orders`, `PATCH /orders/:id/status`, `/refunds*`** | Route cũ tin dữ liệu client / đổi trạng thái tay | ✅ Đã thực hiện |
 
 ### Quyết định cần chốt (Phase 3 sắp tới)
@@ -311,16 +314,16 @@ Các câu hỏi thiết kế còn mở (nguồn giá, hoàn kho khi huỷ, vouch
 ### Tiêu chí thành công Phase 0-2 (Đã đạt ✅)
 
 - ✅ Mọi service có health check + graceful shutdown
-- ✅ Saga pattern đã verify bằng test (compensate khi fail)
-- ✅ Test coverage ≥70% cho critical path (Saga, Outbox, Stock adjust)
-- ✅ Flow checkout end-to-end (luồng Saga cũ; nay thay bằng checkout v2 — e2e chưa chạy lại)
+- ✅ ~~Saga pattern đã verify bằng test~~ → đã thay bằng checkout v2; bù trừ được kiểm bằng unit test và E2E (E-04, E-05, E-11)
+- 🔄 Test coverage ≥70% cho critical path: chưa có báo cáo coverage
+- ✅ Flow checkout end-to-end (checkout v2): E-01…E-13 PASS trên stack thật (E-14 chưa chạy)
 - ✅ Không phụ thuộc RabbitMQ (nay dùng Kafka cho event)
 - ✅ Service giao tiếp qua TCP (RPC) và Kafka (event/command); không truy cập bảng của service khác
 
 ### Tiêu chí thành công Phase 3 (Mục tiêu)
 
 - [ ] Jaeger trace capture 100% các cuộc gọi giữa service
-- [ ] Prometheus scrape thành công endpoint /metrics của cả 10 service (thêm target inventory 9472, shipping 9473)
+- [ ] Prometheus scrape thành công endpoint /metrics của cả 10 service (`prometheus.yml` đã có đủ 10 target; chưa xác nhận scrape thật)
 - [ ] Grafana dashboard hiển thị health, latency, error rate của service
 - [ ] Mọi API endpoint đã document trong Swagger
 - [ ] Payment provider thật (vnpay) đã test end-to-end
@@ -358,7 +361,7 @@ Các câu hỏi thiết kế còn mở (nguồn giá, hoàn kho khi huỷ, vouch
 
 1. **Tạo plan chi tiết cho Phase 3** (checklist các task cụ thể)
 2. **Chọn khu vực ưu tiên**: wiring observability hay tích hợp provider thật trước?
-3. **Chạy runbook kiểm chứng checkout v2 trên stack thật** (migration, int-spec, e2e), rồi fix gap nghiêm trọng (ownership check, cache product) trước khi hardening
+3. **Hoàn tất kiểm chứng checkout v2** (E-14, k6, seed) và chọn phương án F1; rồi fix gap nghiêm trọng (ownership check, cache product) trước khi hardening
 4. **Setup CI/CD** (GitHub Actions với bước lint, test, build)
 5. **Thực hiện security audit** (review code cho auth, xử lý dữ liệu, secret)
 6. **Load testing** (verify hệ thống scale được tới mức concurrency mục tiêu)

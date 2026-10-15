@@ -54,8 +54,8 @@ Người mới đọc [docs/onboarding-guide.md](./docs/onboarding-guide.md) tr�
 - **Auth**: access 15m + refresh 7d; session = Redis `refresh_token:{userId}:{sessionId}`; Gateway `VERIFY_TOKEN` mỗi request, permissions = OR bitmask role (tính lại mỗi request). Không có endpoint refresh.
 - **Gateway** bắt buộc header `x-api-key` cho mọi route (trừ `/health` và `/simulator/*`); `x-idempotency-key` bắt buộc cho `POST /cart/checkout` (Redis lỗi → 503 fail-closed), tuỳ chọn ở route ghi khác.
 - **Env**: `validateEnv` bắt buộc `DB_*`, `REDIS_*`, `JWT_*`, `API_KEY`, **`KAFKA_BROKERS`**, **`PAYMENT_WEBHOOK_SECRET`**, **`SHIPPING_WEBHOOK_SECRET`** (thiếu một biến → mọi service không khởi động). Tuỳ chọn: `ORDER_TAX_RATE`, `ORDER_SHIPPING_FEE_FLAT`, `CART_TTL_SECONDS`, `ORDER_PAYMENT_TTL_SECONDS` (900), `ORDER_RETURN_WINDOW_DAYS` (7), `PUBLIC_API_BASE_URL`, `PAYMENT_SIM_MODE`, `PAYMENT_SIM_DELAY_MS`, `SHIPPING_SIM_MODE`, `SHIPPING_SIM_DELIVER_DELAY_MS`, `INVENTORY_EXPIRY_GRACE_SECONDS`, `KAFKA_TOPIC_PARTITIONS`, `KAFKA_CONSUMER_MAX_ATTEMPTS`, `KAFKA_CONSUMER_RETRY_BACKOFF_MS`, `OUTBOX_RELAY_INTERVAL_MS`, `OUTBOX_MAX_RETRY`, `CORS_ORIGINS`, `THROTTLE_LIMIT_DEFAULT`, `THROTTLE_LOGIN_LIMIT` (login/register, mặc định 5/phút/IP), `DB_POOL_MAX/MIN`. Load test k6: [docs/load-testing-guide.md](./docs/load-testing-guide.md).
-- **Chạy**: `npm run docker:up` (postgres, redis, **kafka**, jaeger, prometheus, grafana, minio) → `npm run start:all` (10 app); `npm run seed` (dữ liệu lớn, mật khẩu `Password123`; ghi thẳng `stock_items`). Khởi động Orders/Inventory/Shipping/Promotion/Notification **trước** khi có event đầu tiên (consumer `fromBeginning:false`).
-- **Trạng thái kiểm chứng**: code checkout v2 đã được viết và có unit test (mock) + build xanh; **chưa kiểm chứng trên stack thật** (migration, int-spec, Kafka, e2e) — xem [docs/target-checkout-architecture.md §10](./docs/target-checkout-architecture.md) và runbook trong `plans/261015-1700-checkout-v2-event-driven/reports/phase-14-report.md`.
+- **Chạy**: `npm run docker:up` (postgres, redis, **kafka**, jaeger, prometheus, grafana, minio, exporter) → `npm run start:all` (10 app). **Backup DB trước** khi bật service trên DB có dữ liệu: migration checkout v2 xoá cột `stock` và đổi enum trạng thái đơn (chạy tự động khi service khởi động). `npm run seed` (dữ liệu lớn, mật khẩu `Password123`) ghi vào DB `ecommerce` theo đường dẫn cứng và chưa chạy lại sau cutover. Khởi động Orders/Inventory/Shipping/Promotion/Notification **trước** khi có event đầu tiên (consumer `fromBeginning:false`; xem lỗi F1 trong [design-trade-offs.md §5 R20](./docs/design-trade-offs.md)).
+- **Trạng thái kiểm chứng** (2026-10-15): migration áp trên DB test và dev; 33/33 int-spec pass trên Postgres + Kafka thật; E2E E-01…E-13 PASS. **Chưa kiểm chứng**: E-14 (Kafka tắt), k6 sau cutover, F1. Chi tiết: [docs/target-checkout-architecture.md §10](./docs/target-checkout-architecture.md) và [e2e-test-report.md](./plans/261015-1700-checkout-v2-event-driven/reports/e2e-test-report.md).
 - **Rủi ro đã biết, không lặp lại khi viết code mới**: thiếu kiểm tra chủ sở hữu ở `GET /orders*`, `GET /orders/:id/refunds`, addresses; `/vouchers/apply` tiêu lượt không gắn đơn; logout không auth; idempotency Gateway get-then-set không nguyên tử; crash giữa `RESERVE_VOUCHER` và TX tạo đơn làm kẹt lượt voucher; Payment/Shipping là simulator. Đã đóng: tin `unitPrice/userId` từ client (route `POST /orders` đã xoá), voucher chưa nối checkout, outbox at-most-once, Saga trừ kho/charge đồng bộ. Danh sách đầy đủ: [design-trade-offs.md §5](./docs/design-trade-offs.md).
 
 ## 3. Công nghệ Dữ liệu (Tech Stack)
@@ -79,13 +79,13 @@ Khi viết code hoặc chỉnh sửa dự án, AI Agents **bắt buộc** phải
 
 ### 4.2. Error Handling (Xử lý Ngoại lệ)
 
-- **Trong Microservices**: Xử lý lỗi bằng cách ném (throw) `RpcException` hoặc các lỗi chuẩn của NestJS (`BadRequestException`, `NotFoundException`, v.v.). Lỗi sẽ được `UserRpcExceptionFilter` (kế thừa `AbstractRpcExceptionFilter`) đón và format lại để truyền an toàn qua TCP.
+- **Trong Microservices**: Xử lý lỗi bằng cách ném (throw) `RpcException({ statusCode, message })` hoặc các lỗi chuẩn của NestJS (`BadRequestException`, `NotFoundException`, v.v.). Mỗi service có một `RpcExceptionFilter` kế thừa `AbstractRpcExceptionFilter` (vd `UserRpcExceptionFilter`) để format lỗi an toàn qua TCP.
 - **Trong Gateway**: Sử dụng `HttpExceptionFilter` để map các lỗi nhận được từ Microservices thành HTTP Status Code phù hợp để trả về cho người dùng.
 
 ### 4.3. Quản lý Authentication Token
 
 - **Bảo mật**: Mật khẩu **phải** được băm (hash) bằng `bcrypt` trước khi lưu vào PostgreSQL.
-- **Quản lý Session**: Sử dụng cơ chế Stateless JWT.
+- **Quản lý Session**: Sử dụng cơ chế Stateless JWT. Permissions tính lại mỗi request qua User `VERIFY_TOKEN`.
 - **Thu hồi Token (Revoke)**: Access Token không lưu vào DB. Thay vào đó, Refresh Token được lưu vào **Redis** (sử dụng `libs/cached`) với TTL tương ứng. Khi đăng xuất, mã token trong Redis sẽ bị xóa (`del`) để đảm bảo không thể lấy Access Token mới.
 
 ### 4.4. Môi trường và Cấu hình (Config)

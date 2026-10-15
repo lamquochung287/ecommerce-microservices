@@ -167,32 +167,21 @@ Metric nghiệp vụ lấy bằng truy vấn SQL tuỳ biến `monitoring/postgr
 đã deprecated nhưng còn chạy ở v0.15.0): `outbox_messages_count`, `outbox_oldest_pending_age_seconds`, `orders_by_status_count`,
 `orders_stuck_fulfillment_count`, `inventory_reservations_count`, `inventory_stock_totals_*`, `shipments_by_status_count`.
 Các bảng chỉ có sau khi migration chạy; trước đó panel nghiệp vụ trống. Sau khi sửa `prometheus.yml` phải khởi động lại
-container prometheus (file được mount, không tự reload). Dashboard Infrastructure **chưa kiểm chứng trên stack thật**:
-cú pháp PromQL (53 biểu thức) đã qua `promtool`, tên metric Kafka/Redis đã đối chiếu với exporter chạy thật, riêng metric
-PostgreSQL và truy vấn tuỳ biến chưa chạy vì chưa bật exporter trên DB.
+container prometheus (file được mount, không tự reload). Dashboard Infrastructure: cú pháp PromQL (53 biểu thức) đã qua `promtool`; tên metric Kafka/Redis đã đối chiếu với exporter
+chạy thật. Metric PostgreSQL và truy vấn tuỳ biến **chưa kiểm trên exporter chạy thật** (postgres-exporter đã có trong compose).
 
 ### Health Checks
 
 ```
-GET /health (Gateway + tất cả microservices)
-Response:
-{
-  "status": "up",
-  "checks": {
-    "database": { "status": "up" },
-    "redis": { "status": "up" },
-    "memory": { "status": "up" }
-  },
-  "info": {
-    "uptime": 3600,
-    "timestamp": "..."
-  }
-}
+GET /health (Gateway, dùng @nestjs/terminus)
+├─ redis                 RedisHealthIndicator (ping)
+├─ user-service          TCP health_check, timeout 5s
+├─ product-service       TCP health_check, timeout 5s
+└─ order-service         TCP health_check, timeout 5s
 
-Dùng bởi:
-├─ Container orchestrator (liveness/readiness probe)
-├─ Load balancer (định tuyến traffic)
-└─ Monitoring dashboard (hiển thị trạng thái)
+Mỗi microservice có health_check TCP riêng (HealthController, Terminus ping DB;
+User thêm ping Redis). Payment, Notification, Review, Promotion, Inventory, Shipping
+và Kafka chưa nằm trong /health của Gateway (xem gateway-flow §6).
 ```
 
 ---
@@ -202,7 +191,7 @@ Dùng bởi:
 ### Payment Provider
 - **Hiện tại**: `SimulatedPaymentProvider` (token DI `PAYMENT_PROVIDER`, `useFactory`): `createIntent` trả `checkoutUrl` về `/simulator/pay/:intentId`, `refund` luôn thành công, webhook ký HMAC thật bằng `PAYMENT_WEBHOOK_SECRET`. Không gọi dịch vụ ngoài.
 - **Kế hoạch**: vnpay/momo — implement `PaymentProvider` (`createIntent`, `refund`, `signWebhook`, `verifyWebhook`) và chọn provider theo env; ký trên raw body.
-- **Trạng thái**: flow simulate hoạt động ở mức code + unit test; chưa chạy e2e trên stack thật.
+- **Trạng thái**: flow simulator đã chạy E2E trên stack thật: thanh toán thành công và thất bại, webhook trùng (E-07). E2E gọi `POST /simulator/pay/...` bằng HTTP, không mở trình duyệt.
 
 ### Shipping Carrier
 - **Hiện tại**: `SimulatedShippingProvider` (token `SHIPPING_PROVIDER`): trả mã vận đơn ngẫu nhiên, giao hàng do timer (`SHIPPING_SIM_DELIVER_DELAY_MS`), admin (`POST /shipments/:orderId/deliver`) hoặc webhook HMAC (`SHIPPING_WEBHOOK_SECRET`) kích hoạt; `SHIPPING_SIM_MODE=fail` để thử retry/DLQ.
@@ -226,55 +215,15 @@ Dùng bởi:
 
 ## Graceful Shutdown & Health Management
 
-### Trình tự shutdown
+### Shutdown
 
-```
-Nhận SIGTERM (từ container orchestrator hoặc OS)
-     ↓
-1. Ngừng nhận request mới
-   ├─ Microservices: dừng TCP server
-   └─ Gateway: dừng HTTP server
-     ↓
-2. Chờ các request đang xử lý hoàn tất (mặc định timeout 30s)
-   ├─ DB transaction commit/rollback
-   ├─ Redis operation hoàn tất
-   └─ Microservice RPC call resolve
-     ↓
-3. Đóng kết nối
-   ├─ Đóng connection pool DB
-   ├─ Đóng kết nối Redis
-   ├─ Đóng MinIO client
-   └─ Đóng TCP listener
-     ↓
-4. Thoát process (exit code 0 nếu sạch, khác 0 nếu timeout)
-```
+Mọi service gọi `app.enableShutdownHooks()` trong `main.ts`. Khi nhận SIGTERM, Nest đóng server (HTTP hoặc microservice, kể cả Kafka consumer) và chạy các hook `onModuleDestroy`. Outbox relay tự dừng timer trong `onModuleDestroy`.
+
+- Code **không** cấu hình timeout chờ 30 giây hay cơ chế drain request riêng. Hành vi khi request đang chạy dở (vd transaction đang mở) chưa được kiểm chứng.
 
 ### Tích hợp Container Orchestrator
 
-```yaml
-# Docker health check
-healthcheck:
-  test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-  interval: 30s
-  timeout: 10s
-  retries: 3
-  start_period: 5s
-
-# Kubernetes liveness/readiness probes
-livenessProbe:
-  httpGet:
-    path: /health
-    port: 3000
-  initialDelaySeconds: 10
-  periodSeconds: 30
-
-readinessProbe:
-  httpGet:
-    path: /health
-    port: 3000
-  initialDelaySeconds: 5
-  periodSeconds: 10
-```
+`docker-compose.yml` hiện **không khai báo healthcheck** cho service nào. Gateway có `GET /health` (mục trên) nếu cần probe khi triển khai, ví dụ `curl -f http://localhost:3000/health`. Chưa có cấu hình Kubernetes trong repo.
 
 ---
 
@@ -284,14 +233,14 @@ readinessProbe:
 
 | Package | Trạng thái | Lý do |
 |---------|--------|--------|
-| amqp-connection-manager | Dead code | RabbitMQ đã bị loại bỏ hoàn toàn (kênh bất đồng bộ nay là Kafka qua `kafkajs`) |
-| amqplib | Dead code | RabbitMQ đã bị loại bỏ hoàn toàn |
+| amqp-connection-manager | Còn trong `package.json`, không có import nào | RabbitMQ không dùng (kênh bất đồng bộ là Kafka qua `kafkajs`). Gỡ khỏi `package.json` |
+| amqplib | Còn trong `package.json`, không có import nào | Như trên |
 
 ### Code cũ/trùng lặp
 
 | Vị trí | Vấn đề | Hành động đề xuất |
 |----------|-------|--------|
-| `libs/common/src/constant/cmd.ts` | Trùng với `libs/constant/message-pattern.constant.ts` | Dùng file sau, xoá file này |
+| `libs/common/src/constant/cmd.ts` | Vẫn được `apps/user/src/user.controller.ts` và `apps/notification/src/order-events.controller.ts` dùng (`CMD.GET_USER_INFO`), trùng giá trị với `USER_MESSAGE_PATTERN.GET_USER_INFO` | Chuyển hai nơi sang `libs/constant/message-pattern.constant.ts`, rồi xoá file |
 
 ---
 

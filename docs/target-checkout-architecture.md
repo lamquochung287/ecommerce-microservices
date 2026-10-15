@@ -1,7 +1,7 @@
 # Target Architecture — Checkout, Fulfillment & Event-driven Orchestration
 
 **Ngày cập nhật**: 2026-10-15
-**Trạng thái**: ✅ **ĐÃ IMPLEMENT (code) — CHƯA KIỂM CHỨNG TRÊN STACK THẬT.** Cutover một lần đã thực hiện ở mức code: Saga đồng bộ cũ đã xoá, 10 app `nest build` xanh, unit test (mock) xanh. Migration, int-spec (Postgres), seed, load test k6 và e2e qua Kafka thật **chưa chạy** (bị cấm chạm DB trong lần cutover này). Luồng + rule hiện hành: [business-flows.md](./business-flows.md), [module-processing-flows.md](./module-processing-flows.md), [system-architecture-orders-flow.md](./system-architecture-orders-flow.md). Bảng trạng thái chi tiết ở §10; các điểm triển khai khác thiết kế gốc ở §10.2.
+**Trạng thái**: ✅ **ĐÃ IMPLEMENT VÀ KIỂM CHỨNG MỘT PHẦN** (2026-10-15). Cutover một lần đã thực hiện: Saga đồng bộ cũ đã xoá, 10 app `nest build` xanh. Migration áp trên DB test và dev; 33/33 int-spec pass trên Postgres + Kafka thật; E2E E-01…E-13 PASS. **Chưa kiểm chứng**: E-14 (Kafka tắt), k6 sau cutover, seed lại. Lỗi F1 đã tái hiện và chưa xử lý (xem §11, câu 13). Luồng + rule hiện hành: [business-flows.md](./business-flows.md), [module-processing-flows.md](./module-processing-flows.md), [system-architecture-orders-flow.md](./system-architecture-orders-flow.md). Bảng trạng thái chi tiết ở §10; các điểm triển khai khác thiết kế gốc ở §10.2.
 
 ## 1. Vì sao đổi
 
@@ -234,21 +234,21 @@ Lệch version không bao giờ làm mất event: bên thua luôn đọc lại s
 
 ## 10. Phạm vi implement & trạng thái
 
-Cập nhật 2026-10-15 (sau cutover). ✅ = **code + unit test mock + build xanh**; chưa hạng mục nào được kiểm chứng trên Postgres/Kafka thật trừ phần ghi rõ.
+Cập nhật 2026-10-15 (sau cutover và kiểm chứng trên stack thật). ✅ = đã làm; cột kiểm chứng ghi rõ bằng chứng.
 
 | Hạng mục | Trạng thái | Ghi chú kiểm chứng |
 |---|---|---|
-| State machine mới + migration | ✅ Đã làm | Migration `AddOrderLifecycleColumns` + `FinalizeOrderStatusAndStockOwnership`; **chưa chạy trên DB nào**; int-spec khoá lạc quan (TC-42) viết sẵn, chưa chạy |
-| Kafka + outbox relay at-least-once + inbox | ✅ Đã làm | `libs/messaging`; relay/producer **đã chạy int-spec trên Postgres + Kafka thật ở nền tảng** (5/5); các service dùng nó chưa chạy thật |
-| `apps/inventory` (reserve/commit/release + expiry) | ✅ Đã làm | Unit mock; SQL `unnest`/`NULLS NOT DISTINCT`/`FOR UPDATE OF` và int-spec (TC-22,25,26,27,35) chưa chạy |
-| Payment `createIntent` + webhook→outbox + refund | ✅ Đã làm | Unit mock; int-spec webhook/refund + migration `AddPaymentIntentAndRefund` chưa chạy |
-| `apps/shipping` + carrier mô phỏng + webhook giao hàng | ✅ Đã làm | Unit mock; int-spec + migration `AddShipments` chưa chạy |
-| Voucher nối checkout (validate → reserve → confirm/release) | ✅ Đã làm | Unit mock; int-spec (TC-153) + migration `AddVoucherRedemptions` chưa chạy |
-| Refund: huỷ → `CANCELLED` + hoàn tiền ở Payment; hoàn hàng → `REFUNDING→REFUNDED` | ✅ Đã làm | Unit mock; raw SQL `UPDATE refunds` và `manager.insert(Refund, {order:{id}})` chưa kiểm trên Postgres thật; int-spec TC-132 chưa chạy |
-| Scheduler hết hạn 15' + auto COMPLETED 7 ngày | ✅ Đã làm | Unit mock (có `jest.mock('@nestjs/schedule')`); chạy thật chưa |
-| Gateway: checkout trả `payment_url`, idempotency bắt buộc, simulator, huỷ/hoàn, catalog ghép tồn kho | ✅ Đã làm | 60 unit/supertest (mock Orders/Payment/Redis); chưa smoke qua stack thật |
-| Cutover: xoá Saga cũ, migration chốt, seed/loadtest/http/docs | ✅ Đã làm | `grep` code rỗng với `CREATE_ORDER|CHARGE_PAYMENT|ADJUST_STOCK` cũ; seed/k6/compose **chỉ sửa mã, chưa chạy** |
-| **E2E runbook E-01…E-14** (`plans/261015-1700-checkout-v2-event-driven/test-cases.md`) | ⏳ **Chưa chạy** | Cần Postgres + Kafka + 10 app; danh sách và thứ tự ở báo cáo phase 14 |
+| State machine mới + migration | ✅ Đã làm | Migration `AddOrderLifecycleColumns` + `FinalizeOrderStatusAndStockOwnership` áp trên DB test (up/down/up, remap đúng) và DB dev (25.141 đơn giữ nguyên; `PENDING`+`PROCESSING` → 5.415 `PENDING_PAYMENT` có `expiresAt`). `order-transition.int-spec.ts` pass (khoá lạc quan) |
+| Kafka + outbox relay at-least-once + inbox | ✅ Đã làm | `libs/messaging`; `outbox-relay.int-spec.ts` (3) và `kafka-producer.int-spec.ts` (2) pass trên Postgres + Kafka thật; các service dùng nó đã chạy E2E |
+| `apps/inventory` (reserve/commit/release + expiry) | ✅ Đã làm | `reservation.int-spec.ts` (6) và `inventory-commands.int-spec.ts` (4) pass: `unnest`, `NULLS NOT DISTINCT`, `FOR UPDATE OF`, reserve song song. Seed/loadtest chưa chạy lại |
+| Payment `createIntent` + webhook→outbox + refund | ✅ Đã làm | `payment-webhook-refund.int-spec.ts` pass 4/4 (sau sửa lỗi kiểu tham số SQL trong chính spec); migration `AddPaymentIntentAndRefund` áp được; E2E E-07, webhook sai chữ ký → 400 |
+| `apps/shipping` + carrier mô phỏng + webhook giao hàng | ✅ Đã làm | `shipping.int-spec.ts` pass 5/5 (sau sửa `eventId` thành UUID tất định); E2E E-03, E-11 PASS; webhook eventId không phải UUID → 400 |
+| Voucher nối checkout (validate → reserve → confirm/release) | ✅ Đã làm | `voucher-reserve.int-spec.ts` pass 5/5; E2E E-12 PASS |
+| Refund: huỷ → `CANCELLED` + hoàn tiền ở Payment; hoàn hàng → `REFUNDING→REFUNDED` | ✅ Đã làm | E2E E-04, E-10, E-11 PASS. Raw SQL `UPDATE refunds` đã int-spec; `manager.insert(Refund, {order:{id}})` chưa kiểm chứng riêng |
+| Scheduler hết hạn 15' + auto COMPLETED 7 ngày | ✅ Đã làm | Hết hạn: E-05 PASS. Auto COMPLETED: kiểm bằng cách đẩy `deliveredAt` lùi (SQL), PASS |
+| Gateway: checkout trả `payment_url`, idempotency bắt buộc, simulator, huỷ/hoàn, catalog ghép tồn kho | ✅ Đã làm | E2E: checkout, simulator, huỷ, hoàn, catalog khi Inventory tắt (E-13) PASS. Chưa kiểm: `x-idempotency-key` thiếu/replay (TC-160/161) |
+| Cutover: xoá Saga cũ, migration chốt, seed/loadtest/http/docs | ✅ Đã làm | `grep` code rỗng với `CREATE_ORDER|CHARGE_PAYMENT|ADJUST_STOCK` cũ. Seed chưa chạy lại (`scripts/seed.ts` trỏ cứng DB `ecommerce`); k6 chưa chạy sau cutover |
+| **E2E runbook E-01…E-14** (`plans/261015-1700-checkout-v2-event-driven/test-cases.md`) | ◐ **E-01…E-13 PASS**; E-14 chưa chạy | Kết quả và bug đã sửa: [e2e-test-report.md](../plans/261015-1700-checkout-v2-event-driven/reports/e2e-test-report.md) |
 
 **Chuyển đổi: cutover một lần** — không feature flag, không chạy song song; đã xoá Saga cũ (`CreateOrderHandler`, `saga/`, `ConfirmOrderPaymentHandler`, `PaymentEventsController` TCP, `CHARGE_PAYMENT`, `ADJUST_STOCK` của Product, `POST /orders`, `PATCH /orders/:id/status`, `/refunds*`) kèm migration trạng thái đơn và chuyển stock sang Inventory.
 
@@ -304,6 +304,7 @@ Không gọi dịch vụ ngoài. Provider mô phỏng chạy trong chính servic
 10. ~~Huỷ đơn~~ → **đã chốt**: huỷ được khi chưa bắt đầu ship; đã ship thì không huỷ cho tới `DELIVERED` mới có nút hoàn hàng; `COMPLETED` không làm gì nữa. Cách giải race `FULFILLING` (state commit trước thắng + `CancelShipment` bù trừ) là **thiết kế mặc định của tôi** ở §7, chưa được bạn xác nhận riêng.
 11. ~~Số tiền hoàn~~ → **đã chốt**: hoàn `totalAmount − shippingFee` (§7.1); phí ship không trả; voucher không trả.
 12. ~~Huỷ/hoàn một phần~~ → **đã chốt**: chỉ cả đơn.
+13. **Mở (F1)**: message Kafka phát khi consumer đang down có thể bị bỏ (`fromBeginning: false`). Cần chọn: `fromBeginning: true` cho topic command (kèm kiểm idempotent từng handler), đặt offset khi tạo group, hay job reconcile đơn `FULFILLING` không có shipment. Tham chiếu [design-trade-offs.md §5 R20](./design-trade-offs.md).
 
 ## 12. Tài liệu liên quan
 

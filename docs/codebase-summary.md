@@ -1,8 +1,8 @@
 # Codebase Summary - Monorepo Structure & Component Overview
 
-**Ngày cập nhật**: 2026-10-15 (sau cutover checkout v2)
+**Ngày cập nhật**: 2026-10-15
 
-> **Trạng thái kiểm chứng**: code, unit test (mock) và `nest build` của cả 10 app đã xong; migration, int-spec (Postgres), seed, load test và e2e qua Kafka **chưa chạy trên stack thật** trong lần cutover này. Số liệu LOC cũ đã bỏ (không còn đo lại).
+> **Trạng thái kiểm chứng** (2026-10-15): code, unit test (mock) và `nest build` của cả 10 app xanh. Migration áp trên DB test và dev; 33/33 int-spec pass trên Postgres + Kafka thật; E2E E-01…E-13 PASS. Chưa chạy: E-14, k6 sau cutover, seed lại. Số liệu LOC cũ đã bỏ (không còn đo lại). Tóm tắt này viết tay từ code, chưa tạo lại từ repomix.
 
 ## Tổng Quan Monorepo
 
@@ -129,7 +129,7 @@ ecommerce-system/
 - **Exception Handling**: `AbstractRpcExceptionFilter` (HttpException/TypeORM/class-validator → RpcException); subclass theo service.
 - **Configuration**: `CommonConfigModule` (ConfigModule global + `validateEnv`). **Bắt buộc**: `DB_*`, `REDIS_HOST/PORT`, `JWT_ACCESS_*`, `JWT_REFRESH_*`, `API_KEY`, `KAFKA_BROKERS`, `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET`. **Tuỳ chọn** (validate): `KAFKA_TOPIC_PARTITIONS`, `KAFKA_CONSUMER_MAX_ATTEMPTS`, `KAFKA_CONSUMER_RETRY_BACKOFF_MS`, `OUTBOX_RELAY_INTERVAL_MS`, `OUTBOX_MAX_RETRY`, `INVENTORY_EXPIRY_GRACE_SECONDS`, `PAYMENT_SIM_MODE`, `PAYMENT_SIM_DELAY_MS`, `PUBLIC_API_BASE_URL`, `ORDER_PAYMENT_TTL_SECONDS`, `ORDER_RETURN_WINDOW_DAYS`, `SHIPPING_SIM_MODE`, `SHIPPING_SIM_DELIVER_DELAY_MS`, `NODE_ENV`. Đọc trực tiếp qua `ConfigService` (không validate): `ORDER_TAX_RATE`, `ORDER_SHIPPING_FEE_FLAT`, `CART_TTL_SECONDS`, `CORS_ORIGINS`, `THROTTLE_*`, `DB_POOL_*`.
 - **Utilities**: `PaginationQueryDto`/`PaginatedResult<T>`, `setupTracing()` (mỗi app một metrics port).
-- **Note**: `src/constant/cmd.ts` là bản trùng/cũ của `libs/constant/message-pattern.constant.ts` (dead code).
+- **Note**: `src/constant/cmd.ts` (`CMD.GET_USER_INFO`) trùng giá trị với `USER_MESSAGE_PATTERN.GET_USER_INFO`; User và Notification vẫn import nó, chưa xoá được.
 
 ### `libs/database/`
 - `DatabaseModule`: `autoLoadEntities`, `synchronize:false`, `migrationsRun:true`, pool max 50/min 5 (`DB_POOL_MAX/MIN`).
@@ -164,7 +164,7 @@ Flat files (không phải lib project trong nest-cli).
 Gateway :3000 (HTTP) · User 3001 · Orders 3002 · Product 3003 · Payment 3004 · Notification 3005 · Review 3006 · Promotion 3007 · Inventory 3008 · Shipping 3009 (TCP).
 
 ### Metrics Ports (OpenTelemetry Prometheus)
-Gateway 9464 · User 9465 · Product 9466 · Orders 9467 · Payment 9468 · Notification 9469 · Review 9470 · Promotion 9471 · Inventory 9472 · Shipping 9473 (`prometheus.yml` chưa có target inventory/shipping).
+Gateway 9464 · User 9465 · Product 9466 · Orders 9467 · Payment 9468 · Notification 9469 · Review 9470 · Promotion 9471 · Inventory 9472 · Shipping 9473 (`prometheus.yml` đã có đủ 10 job `ecommerce-*`).
 
 ---
 
@@ -189,7 +189,7 @@ Gateway 9464 · User 9465 · Product 9466 · Orders 9467 · Payment 9468 · Noti
 
 ## Known Gaps & Roadmap Items
 
-1. **Chưa kiểm chứng trên stack thật**: toàn bộ migration mới, int-spec, seed, load test, e2e checkout (xem [target-checkout-architecture.md §10](./target-checkout-architecture.md)).
+1. **Chưa kiểm chứng**: E-14 (Kafka outage), k6 sau cutover, seed lại. Lỗi F1 (consumer `fromBeginning:false` làm mất message khi service down) đã tái hiện, chưa xử lý (xem [target-checkout-architecture.md §10](./target-checkout-architecture.md) và [design-trade-offs.md](./design-trade-offs.md) R20).
 2. **Product**: chưa cache Redis cho catalog; `ProductCreatedEvent` là stub.
 3. **Payment/Shipping**: chỉ simulator; cổng/carrier thật chưa làm (cần ký raw body).
 4. **Notification**: `PushProvider` chưa được gọi.
@@ -199,7 +199,7 @@ Gateway 9464 · User 9465 · Product 9466 · Orders 9467 · Payment 9468 · Noti
 8. **Idempotency Gateway**: get-then-set không nguyên tử (thiếu `SET NX`).
 9. **Refund**: `FAILED` không retry được; hoàn hàng gặp `PaymentRefundFailed` kẹt `REFUNDING`.
 10. **Env**: không có `.env.example` (README liệt kê biến bắt buộc).
-11. **Auth**: chưa có endpoint refresh token; `gateway.controller.spec.ts` boilerplate đang fail.
+11. **Auth**: chưa có endpoint refresh token. Spec boilerplate fail: `gateway.controller.spec.ts`, `user.controller.spec.ts`.
 
 ---
 
