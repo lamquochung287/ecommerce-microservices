@@ -1,5 +1,6 @@
 import { plainToInstance } from 'class-transformer';
 import {
+	IsIn,
 	IsNotEmpty,
 	IsNumber,
 	IsOptional,
@@ -93,6 +94,44 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsNumber()
 	INVENTORY_EXPIRY_GRACE_SECONDS?: number;
+
+	// Khoá HMAC của webhook thanh toán; bắt buộc, không có giá trị mặc định.
+	@IsNotEmpty()
+	@IsString()
+	PAYMENT_WEBHOOK_SECRET: string;
+
+	// manual: bấm nút trên trang simulator; auto-*: tự gọi webhook sau PAYMENT_SIM_DELAY_MS
+	@IsOptional()
+	@IsIn(['manual', 'auto-success', 'auto-fail'])
+	PAYMENT_SIM_MODE?: string;
+
+	@IsOptional()
+	@IsNumber()
+	PAYMENT_SIM_DELAY_MS?: number;
+
+	@IsOptional()
+	@IsString()
+	PUBLIC_API_BASE_URL?: string;
+
+	// Khoá HMAC của webhook giao hàng; bắt buộc, không có giá trị mặc định.
+	@IsNotEmpty()
+	@IsString()
+	SHIPPING_WEBHOOK_SECRET: string;
+
+	// fail: carrier mô phỏng luôn lỗi (để kiểm thử retry -> DLQ)
+	@IsOptional()
+	@IsIn(['success', 'fail'])
+	SHIPPING_SIM_MODE?: string;
+
+	// >0: tự giao hàng sau ngần này ms kể từ khi tạo vận đơn; 0: chỉ kích hoạt tay
+	@IsOptional()
+	@IsNumber()
+	SHIPPING_SIM_DELIVER_DELAY_MS?: number;
+
+	// 'production' tắt simulator thanh toán và giao hàng
+	@IsOptional()
+	@IsString()
+	NODE_ENV?: string;
 }
 
 export function validateEnv(config: Record<string, any>) {

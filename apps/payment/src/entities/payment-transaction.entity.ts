@@ -3,16 +3,23 @@ import {
 	PrimaryGeneratedColumn,
 	Column,
 	CreateDateColumn,
+	UpdateDateColumn,
 	Unique,
+	Index,
 } from 'typeorm';
 
 export enum PaymentTransactionStatus {
+	PENDING = 'PENDING',
 	SUCCEEDED = 'SUCCEEDED',
 	FAILED = 'FAILED',
+	CANCELLED = 'CANCELLED',
 }
 
+// Một dòng = một payment intent của đơn (idempotencyKey = orderId). Giao dịch charge trực tiếp
+// (luồng cũ) cũng nằm ở đây với status SUCCEEDED/FAILED và không có expiresAt/checkoutUrl.
 @Entity('payment_transactions')
 @Unique(['idempotencyKey'])
+@Index('IDX_payment_transactions_orderId', ['orderId'])
 export class PaymentTransaction {
 	@PrimaryGeneratedColumn('uuid')
 	id: string;
@@ -32,6 +39,19 @@ export class PaymentTransaction {
 	@Column({ type: 'varchar', length: 255, nullable: true })
 	failureReason: string | null;
 
+	// Hạn thanh toán của intent: không dài hơn thời hạn giữ hàng do Orders gửi.
+	@Column({ type: 'timestamptz', nullable: true })
+	expiresAt: Date | null;
+
+	@Column({ type: 'varchar', length: 500, nullable: true })
+	checkoutUrl: string | null;
+
+	@Column({ type: 'timestamptz', nullable: true })
+	paidAt: Date | null;
+
 	@CreateDateColumn()
 	createdAt: Date;
+
+	@UpdateDateColumn({ type: 'timestamptz' })
+	updatedAt: Date;
 }
