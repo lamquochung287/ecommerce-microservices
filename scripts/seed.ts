@@ -243,6 +243,20 @@ async function seed() {
 		await insertRows(client, 'product_variants', ['id', 'product_id', 'sku', 'price', 'stock', 'version'], variantRows);
 		await insertRows(client, 'product_variant_attribute_values', ['variant_id', 'attribute_value_id'], variantValueRows);
 
+		// Tồn kho nằm ở Inventory (stock_items): đồng bộ từ stock vừa seed để sản phẩm mới có hàng để đặt.
+		// Chỉ ghi đè onHand; reserved giữ nguyên vì đơn đang chờ có thể đang giữ hàng.
+		await client.query(
+			`INSERT INTO stock_items ("productId", "variantId", "onHand")
+			 SELECT id, NULL, GREATEST(stock, 0) FROM products WHERE "deletedAt" IS NULL
+			 ON CONFLICT ("productId", "variantId") DO UPDATE SET "onHand" = GREATEST(EXCLUDED."onHand", stock_items."reserved")`,
+		);
+		await client.query(
+			`INSERT INTO stock_items ("productId", "variantId", "onHand")
+			 SELECT product_id, id, GREATEST(stock, 0) FROM product_variants WHERE "deletedAt" IS NULL
+			 ON CONFLICT ("productId", "variantId") DO UPDATE SET "onHand" = GREATEST(EXCLUDED."onHand", stock_items."reserved")`,
+		);
+		console.log('  -> stock_items đồng bộ từ products/product_variants');
+
 		// 7. Vouchers
 		console.log(`\n⏳ Vouchers (${NUM_VOUCHERS})...`);
 		await insertRows(

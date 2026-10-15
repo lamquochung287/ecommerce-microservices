@@ -88,6 +88,11 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsNumber()
 	OUTBOX_MAX_RETRY?: number;
+
+	// Reservation quá expiresAt thêm ngần này giây mới bị job dọn (mặc định 60)
+	@IsOptional()
+	@IsNumber()
+	INVENTORY_EXPIRY_GRACE_SECONDS?: number;
 }
 
 export function validateEnv(config: Record<string, any>) {
