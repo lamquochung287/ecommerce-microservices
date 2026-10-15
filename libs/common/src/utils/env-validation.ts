@@ -113,6 +113,11 @@ export class EnvironmentVariables {
 	@IsString()
 	PUBLIC_API_BASE_URL?: string;
 
+	// Thời gian giữ hàng + hạn thanh toán của đơn chờ thanh toán (mặc định 900 = 15 phút)
+	@IsOptional()
+	@IsNumber()
+	ORDER_PAYMENT_TTL_SECONDS?: number;
+
 	// Khoá HMAC của webhook giao hàng; bắt buộc, không có giá trị mặc định.
 	@IsNotEmpty()
 	@IsString()

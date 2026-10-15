@@ -10,6 +10,9 @@ import { RejectRefundCommand } from './commands/reject-refund.command';
 import { GetOrdersQuery } from './queries/get-orders.query';
 import { GetOrderQuery } from './queries/get-order.query';
 import { GetRefundsQuery } from './queries/get-refunds.query';
+import { CheckoutCommand } from './commands/checkout.command';
+import { PreparePaymentCommand } from './commands/prepare-payment.command';
+import { CheckoutDto } from './dto/checkout.dto';
 import { CreateOrderDto, UpdateOrderStatusDto } from './dto/order.dto';
 import { CreateRefundDto } from './dto/refund.dto';
 
@@ -23,6 +26,23 @@ export class OrdersController {
 	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.CREATE_ORDER })
 	async createOrder(@Payload() dto: CreateOrderDto) {
 		return this.commandBus.execute(new CreateOrderCommand(dto));
+	}
+
+	// userId do Gateway gắn từ token; body chỉ chứa định danh món + địa chỉ.
+	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.CHECKOUT })
+	async checkout(@Payload() payload: { userId: string; dto: CheckoutDto }) {
+		return this.commandBus.execute(
+			new CheckoutCommand(payload.userId, payload.dto),
+		);
+	}
+
+	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.GET_PAYMENT_LINK })
+	async getPaymentLink(
+		@Payload() payload: { orderId: string; userId: string },
+	) {
+		return this.commandBus.execute(
+			new PreparePaymentCommand(payload.orderId, payload.userId),
+		);
 	}
 
 	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.GET_ORDERS })

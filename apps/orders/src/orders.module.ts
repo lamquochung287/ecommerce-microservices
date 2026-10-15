@@ -26,8 +26,15 @@ import { OrderTransitionService } from './order-state/order-transition.service';
 import { HealthModule } from './health/health.module';
 import { SagaModule } from './saga/saga.module';
 import { CartModule } from './cart/cart.module';
+import { ServiceClientsModule } from './clients/clients.module';
+import { CheckoutHandler } from './commands/handlers/checkout.handler';
+import { PreparePaymentHandler } from './commands/handlers/prepare-payment.handler';
+import { OrderCancellationService } from './order-state/order-cancellation.service';
+import { OrderPricingService } from './pricing/order-pricing.service';
 
 export const CommandHandlers = [
+	CheckoutHandler,
+	PreparePaymentHandler,
 	CreateOrderHandler,
 	UpdateOrderStatusHandler,
 	ConfirmOrderPaymentHandler,
@@ -53,6 +60,7 @@ export const EventHandlers = [OrderCreatedHandler];
 		MessagingModule.forService({ source: OUTBOX_SOURCE.ORDERS }),
 		SagaModule,
 		CartModule,
+		ServiceClientsModule,
 	],
 	controllers: [OrdersController, PaymentEventsController],
 	providers: [
@@ -60,6 +68,8 @@ export const EventHandlers = [OrderCreatedHandler];
 		...QueryHandlers,
 		...EventHandlers,
 		OrderTransitionService,
+		OrderCancellationService,
+		OrderPricingService,
 	],
 })
 export class OrdersModule {}
