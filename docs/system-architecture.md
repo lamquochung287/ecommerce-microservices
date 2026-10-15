@@ -138,7 +138,8 @@ Mỗi service trong main.ts gọi setupTracing():
 Mỗi service expose /metrics (PrometheusExporter của OpenTelemetry) trên cổng riêng:
 gateway 9464 · user 9465 · product 9466 · orders 9467 · payment 9468
 notification 9469 · review 9470 · promotion 9471 · inventory 9472 · shipping 9473
-(prometheus.yml hiện chỉ có target cho 8 service đầu; inventory/shipping chưa được thêm.)
+(prometheus.yml có đủ 10 service, job `ecommerce-*`. Hạ tầng đi qua exporter, job `infra-*`: `postgres-exporter` :9187,
+`redis-exporter` :9121, `kafka-exporter` :9308 — chạy trong network compose, không mở cổng ra host.)
 Counter `outbox_failed_total{source}` đếm outbox row chuyển `FAILED`.
 
 Metrics do auto-instrumentation + host-metrics sinh ra (HTTP, DB, Redis, process.*, system.*);
@@ -151,12 +152,24 @@ tên metric cụ thể phụ thuộc phiên bản @opentelemetry — kiểm tra 
 http://localhost:3100 (container grafana:3000)
 Đăng nhập mặc định: admin/admin
 
-Dashboard:
-├─ Service Health (response time, error rate mỗi service)
-├─ Request Tracing (phân tích latency theo span)
-├─ Database Performance (query time, connection pool)
-└─ Cache Performance (Redis hit rate, evictions)
+Dashboard (grafana/dashboards/):
+├─ Ecommerce - Server Overview   (RED theo service Node.js, CPU/RAM/event loop, host)
+├─ Ecommerce - Infrastructure    (PostgreSQL, Redis, Kafka + pipeline nghiệp vụ đo từ DB)
+└─ k6 Load Test                  (VUs, RPS, lỗi, p95)
+
+Infrastructure gồm: Overview (up/down, consumer lag, DLQ, outbox PENDING/FAILED, đơn kẹt) · Pipeline nghiệp vụ
+(đơn/giữ hàng/vận đơn theo trạng thái, tuổi event outbox cũ nhất, tồn kho) · PostgreSQL (kết nối, giao dịch, cache hit,
+lock, deadlock, dead tuples, seq scan) · Redis (bộ nhớ, lệnh/s, hit ratio, evicted) · Kafka (lag theo group/topic,
+msg/s theo topic, DLQ, replica).
 ```
+
+Metric nghiệp vụ lấy bằng truy vấn SQL tuỳ biến `monitoring/postgres-queries.yaml` (postgres-exporter, cờ `--extend.query-path`
+đã deprecated nhưng còn chạy ở v0.15.0): `outbox_messages_count`, `outbox_oldest_pending_age_seconds`, `orders_by_status_count`,
+`orders_stuck_fulfillment_count`, `inventory_reservations_count`, `inventory_stock_totals_*`, `shipments_by_status_count`.
+Các bảng chỉ có sau khi migration chạy; trước đó panel nghiệp vụ trống. Sau khi sửa `prometheus.yml` phải khởi động lại
+container prometheus (file được mount, không tự reload). Dashboard Infrastructure **chưa kiểm chứng trên stack thật**:
+cú pháp PromQL (53 biểu thức) đã qua `promtool`, tên metric Kafka/Redis đã đối chiếu với exporter chạy thật, riêng metric
+PostgreSQL và truy vấn tuỳ biến chưa chạy vì chưa bật exporter trên DB.
 
 ### Health Checks
 

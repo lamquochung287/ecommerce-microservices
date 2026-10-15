@@ -26,3 +26,21 @@ scrape_configs:
   - job_name: 'ecommerce-promotion'
     static_configs:
       - targets: ['host.docker.internal:9471']
+  - job_name: 'ecommerce-inventory'
+    static_configs:
+      - targets: ['host.docker.internal:9472']
+  - job_name: 'ecommerce-shipping'
+    static_configs:
+      - targets: ['host.docker.internal:9473']
+
+  # Hạ tầng dùng tiền tố `infra-` (không phải `ecommerce-`) để không lẫn vào biến $job của dashboard Server Overview,
+  # vốn chỉ dành cho các service Node.js. Exporter chạy trong cùng network compose nên gọi bằng tên service.
+  - job_name: 'infra-postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+  - job_name: 'infra-redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+  - job_name: 'infra-kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']

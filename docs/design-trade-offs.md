@@ -159,7 +159,7 @@ Mức độ: **CAO** = ảnh hưởng tiền/dữ liệu/bảo mật; **TB**; **
 | Auth per request | 1 TCP + Redis + DB | Cache ngắn hạn tại Gateway (§1.2) |
 | Outbox relay | Poll theo interval, `SKIP LOCKED`, index `(status, source, seq)` | Latency vài trăm ms–giây; NOTIFY/LISTEN nếu cần thấp hơn |
 | Load test | k6 `checkout` đã đổi sang body checkout v2 (`x-idempotency-key`); chưa chạy lại sau cutover | Cần stack có Kafka + `PAYMENT_SIM_MODE=auto-success`; đơn k6 không thanh toán sẽ hết hạn sau 15' và trả kho |
-| Observability | Tracing + Prometheus + Grafana đã nối; counter `outbox_failed_total{source}` | `prometheus.yml` chưa có target inventory/shipping; chưa có alert rule (outbox FAILED, DLQ, breaker open) |
+| Observability | Tracing + Prometheus + Grafana đã nối; counter `outbox_failed_total{source}` | Chưa có alert rule (outbox FAILED, DLQ, consumer lag, breaker open); dashboard Infrastructure mới chỉ để xem, chưa kiểm chứng trên stack thật |
 | Test | Unit test (mock) đã phủ phần lớn handler mới; int-spec (`npm run test:int`) viết sẵn cho race/lock/SKIP LOCKED | **Chưa chạy** int-spec và e2e trên stack thật tại thời điểm cutover; 2 spec cũ của User (`role.service`, `address.service`) vẫn cần Postgres; `gateway.controller.spec.ts` boilerplate đang fail |
 | Scale ngang | Outbox `SKIP LOCKED`, scheduler an toàn nhờ optimistic lock, host `localhost` | Cần cấu hình host/broker khi tách container |
 

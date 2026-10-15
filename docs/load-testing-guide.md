@@ -11,6 +11,7 @@ Mục tiêu: 500 user đồng thời trên VPS **2 vCPU / 4 GB**. Stack chạy t
 | `loadtest/k6/load-test.js` | Kịch bản k6 (profile `mixed`, `read`, `cart`, `checkout`, `auth`) |
 | `loadtest/collect-docker-stats.sh` | Ghi CPU/RAM từng container ra CSV |
 | `grafana/dashboards/k6-load-test.json` | Dashboard k6 (VUs, RPS, lỗi, p95) |
+| `grafana/dashboards/ecommerce-infrastructure.json` | Dashboard PostgreSQL/Redis/Kafka + pipeline nghiệp vụ; xem CPU, kết nối DB, lag consumer, DLQ trong lúc chạy tải |
 
 Container `apps` cần Kafka (service `kafka` của `docker-compose.yml`, `KAFKA_BROKERS=kafka:29092`) cùng `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` (đã đặt trong `docker-compose.loadtest.yml`). Image chạy `NODE_ENV=production` làm simulator bị tắt (không đơn nào thanh toán được), nên compose loadtest đặt `NODE_ENV=development`; biến này chỉ được các simulator đọc. `PAYMENT_SIM_MODE` mặc định `manual` (k6 tự thanh toán qua `/simulator/pay`), đổi bằng `LT_PAYMENT_SIM_MODE=auto-success` nếu muốn Payment tự thanh toán sau `LT_PAYMENT_SIM_DELAY_MS`. Shipping tự "đã giao" sau `LT_SHIPPING_DELIVER_DELAY_MS` (mặc định 5000ms, `0` = tắt), hạn thanh toán/giữ hàng đặt bằng `LT_ORDER_PAYMENT_TTL_SECONDS` (mặc định 900).
 

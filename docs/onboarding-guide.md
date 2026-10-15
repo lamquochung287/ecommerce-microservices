@@ -104,7 +104,7 @@ Một request xuyên hệ thống — đọc theo chiều đi của nó:
 
 ```bash
 npm install
-npm run docker:up        # postgres, redis, kafka, jaeger, prometheus, grafana, minio
+npm run docker:up        # postgres, redis, kafka, jaeger, prometheus, grafana, minio + exporter postgres/redis/kafka
 # tạo .env (bắt buộc: DB_*, REDIS_*, JWT_*, API_KEY, KAFKA_BROKERS=localhost:9092,
 #   PAYMENT_WEBHOOK_SECRET, SHIPPING_WEBHOOK_SECRET — xem libs/common/src/utils/env-validation.ts;
 #   thiếu một biến thì mọi service không khởi động)

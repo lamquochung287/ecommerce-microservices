@@ -33,6 +33,34 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
 
+  # Exporter cho Prometheus (job `infra-*` trong prometheus.yml), xem dashboard "Ecommerce - Infrastructure".
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.15.0
+    command:
+      - --extend.query-path=/queries.yaml # metric nghiệp vụ: outbox, đơn theo trạng thái, giữ hàng, vận đơn
+      - --collector.stat_user_tables
+    environment:
+      DATA_SOURCE_NAME: postgresql://root:password@postgres:5432/ecommerce?sslmode=disable
+    volumes:
+      - ./monitoring/postgres-queries.yaml:/queries.yaml:ro
+    depends_on:
+      - postgres
+
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.62.0
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      - redis
+
+  # Lag consumer group, offset từng topic (kể cả *.dlq) qua listener nội bộ của broker.
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.8.0
+    command:
+      - --kafka.server=kafka:29092
+    depends_on:
+      - kafka
+
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:

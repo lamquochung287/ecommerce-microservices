@@ -1,0 +1,106 @@
+# Metric nghiệp vụ lấy từ chính DB, cho dashboard "Ecommerce - Infrastructure".
+# postgres-exporter đọc file này qua --extend.query-path (cờ đã deprecated nhưng vẫn chạy ở v0.15.0).
+# Các bảng chỉ tồn tại sau khi migration chạy; trước đó exporter chỉ ghi log lỗi truy vấn, không làm hỏng metric chuẩn.
+
+# Hàng đợi Outbox: PENDING tăng dần nghĩa là relay không gửi kịp hoặc Kafka có vấn đề; FAILED cần xử lý tay.
+outbox_messages:
+  query: |
+    SELECT source, status::text AS status, count(*)::float8 AS count
+    FROM outbox
+    GROUP BY source, status
+  metrics:
+    - source:
+        usage: "LABEL"
+        description: "Service ghi event"
+    - status:
+        usage: "LABEL"
+        description: "PENDING | PUBLISHED | FAILED"
+    - count:
+        usage: "GAUGE"
+        description: "Số event trong outbox"
+
+# Tuổi event PENDING cũ nhất (giây): độ trễ thực của pipeline outbox -> Kafka.
+outbox_oldest_pending:
+  query: |
+    SELECT source, COALESCE(EXTRACT(EPOCH FROM (now() - min("createdAt"))), 0)::float8 AS age_seconds
+    FROM outbox
+    WHERE status = 'PENDING'
+    GROUP BY source
+  metrics:
+    - source:
+        usage: "LABEL"
+        description: "Service ghi event"
+    - age_seconds:
+        usage: "GAUGE"
+        description: "Tuổi (giây) của event PENDING cũ nhất"
+
+# Phân bố đơn theo trạng thái: thấy đơn kẹt PENDING_PAYMENT/FULFILLING và tỉ lệ CANCELLED.
+orders_by_status:
+  query: |
+    SELECT status::text AS status, count(*)::float8 AS count
+    FROM orders
+    GROUP BY status
+  metrics:
+    - status:
+        usage: "LABEL"
+        description: "Trạng thái đơn"
+    - count:
+        usage: "GAUGE"
+        description: "Số đơn"
+
+# Đơn PAID/FULFILLING chưa có vận đơn quá 5 phút: dấu hiệu lệnh CreateShipment bị mất hoặc Shipping chậm.
+orders_stuck_fulfillment:
+  query: |
+    SELECT count(*)::float8 AS count
+    FROM orders
+    WHERE status IN ('PAID', 'FULFILLING') AND "updatedAt" < now() - interval '5 minutes'
+  metrics:
+    - count:
+        usage: "GAUGE"
+        description: "Số đơn PAID/FULFILLING không tiến triển quá 5 phút"
+
+# Giữ hàng: RESERVED đang giữ kho; EXPIRED nhiều nghĩa là nhiều đơn bỏ dở.
+inventory_reservations:
+  query: |
+    SELECT status::text AS status, count(*)::float8 AS count
+    FROM reservations
+    GROUP BY status
+  metrics:
+    - status:
+        usage: "LABEL"
+        description: "RESERVED | COMMITTED | RELEASED | EXPIRED | RESTOCKED"
+    - count:
+        usage: "GAUGE"
+        description: "Số reservation"
+
+# Số lượng đang bị giữ so với tồn: tồn khả dụng = on_hand - reserved.
+inventory_stock_totals:
+  query: |
+    SELECT COALESCE(sum("onHand"), 0)::float8 AS on_hand,
+           COALESCE(sum("reserved"), 0)::float8 AS reserved,
+           count(*) FILTER (WHERE "onHand" - "reserved" <= 0)::float8 AS sold_out_items
+    FROM stock_items
+  metrics:
+    - on_hand:
+        usage: "GAUGE"
+        description: "Tổng tồn thực"
+    - reserved:
+        usage: "GAUGE"
+        description: "Tổng đang giữ"
+    - sold_out_items:
+        usage: "GAUGE"
+        description: "Số dòng tồn kho hết hàng khả dụng"
+
+# Vận đơn theo trạng thái; FAILED là Shipping đã hết 3 lần retry và đẩy vào DLQ.
+shipments_by_status:
+  query: |
+    SELECT status::text AS status, count(*)::float8 AS count
+    FROM shipments
+    GROUP BY status
+  metrics:
+    - status:
+        usage: "LABEL"
+        description: "Trạng thái vận đơn"
+    - count:
+        usage: "GAUGE"
+        description: "Số vận đơn"

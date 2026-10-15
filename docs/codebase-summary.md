@@ -28,7 +28,7 @@ ecommerce-system/
 │   ├── media/           # MinIO S3-compatible storage
 │   ├── messaging/       # Kafka: outbox/inbox, consumer runner, producer, topics
 │   └── constant/        # Ports, message patterns, Kafka topics/types, permissions
-├── docker-compose.yml   # Postgres, Redis, Kafka (KRaft), Jaeger, Prometheus, Grafana, MinIO
+├── docker-compose.yml   # Postgres, Redis, Kafka (KRaft), exporter (postgres/redis/kafka), Jaeger, Prometheus, Grafana, MinIO
 ├── scripts/seed.ts      # Seed dữ liệu lớn (products + stock_items, orders theo state machine mới)
 ├── loadtest/            # k6 + docker compose load test (10 app)
 ├── http/api-tests.http  # Request mẫu (checkout v2, simulator, huỷ/hoàn, giao hàng)
