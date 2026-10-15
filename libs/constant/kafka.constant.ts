@@ -62,4 +62,5 @@ export const OUTBOX_SOURCE = {
 	PAYMENT: 'payment',
 	SHIPPING: 'shipping',
 	NOTIFICATION: 'notification',
+	PROMOTION: 'promotion',
 } as const;

@@ -1,5 +1,5 @@
 import { Controller } from '@nestjs/common';
-import { MessagePattern } from '@nestjs/microservices';
+import { MessagePattern, Transport } from '@nestjs/microservices';
 import {
 	HealthCheckService,
 	TypeOrmHealthIndicator,
@@ -14,7 +14,7 @@ export class HealthController {
 		private readonly db: TypeOrmHealthIndicator,
 	) {}
 
-	@MessagePattern({ cmd: HEALTH_MESSAGE_PATTERN.HEALTH_CHECK })
+	@MessagePattern({ cmd: HEALTH_MESSAGE_PATTERN.HEALTH_CHECK }, Transport.TCP)
 	@HealthCheck()
 	check() {
 		return this.health.check([() => this.db.pingCheck('database')]);

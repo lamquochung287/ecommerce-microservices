@@ -1,8 +1,8 @@
 import { CommandHandler, ICommandHandler } from '@nestjs/cqrs';
 import { DataSource } from 'typeorm';
-import { RpcException } from '@nestjs/microservices';
 import { ApplyVoucherCommand } from '../apply-voucher.command';
-import { Voucher, DiscountType } from '../../entities/voucher.entity';
+import { Voucher } from '../../entities/voucher.entity';
+import { evaluateVoucher } from '../../domain/voucher-rules';
 
 @CommandHandler(ApplyVoucherCommand)
 export class ApplyVoucherHandler implements ICommandHandler<ApplyVoucherCommand> {
@@ -19,43 +19,15 @@ export class ApplyVoucherHandler implements ICommandHandler<ApplyVoucherCommand>
 				lock: { mode: 'pessimistic_write' },
 			});
 
-			if (!voucher) {
-				throw new RpcException({
-					statusCode: 404,
-					message: 'Voucher not found',
-				});
-			}
-			if (voucher.expiresAt.getTime() < Date.now()) {
-				throw new RpcException({
-					statusCode: 400,
-					message: 'Voucher has expired',
-				});
-			}
-			if (voucher.usageCount >= voucher.usageLimit) {
-				throw new RpcException({
-					statusCode: 400,
-					message: 'Voucher usage limit reached',
-				});
-			}
-			if (orderValue < Number(voucher.minOrderValue)) {
-				throw new RpcException({
-					statusCode: 400,
-					message: `Order value must be at least ${voucher.minOrderValue} to use this voucher`,
-				});
-			}
+			const discountAmount = evaluateVoucher(voucher, orderValue);
 
-			const discountAmount =
-				voucher.discountType === DiscountType.PERCENTAGE
-					? Math.round(
-							orderValue * (Number(voucher.discountValue) / 100) * 100,
-						) / 100
-					: Math.min(Number(voucher.discountValue), orderValue);
-
-			voucher.usageCount += 1;
-			await manager.save(voucher);
+			// evaluateVoucher đã ném khi voucher null nên ở đây chắc chắn có voucher.
+			const locked = voucher as Voucher;
+			locked.usageCount += 1;
+			await manager.save(locked);
 
 			return {
-				code: voucher.code,
+				code: locked.code,
 				discountAmount,
 				finalAmount: orderValue - discountAmount,
 			};
