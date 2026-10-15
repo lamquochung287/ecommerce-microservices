@@ -8,6 +8,8 @@ import {
 } from '@lib/messaging';
 import type {
 	OrderPaidPayload,
+	PaymentRefundedPayload,
+	PaymentRefundFailedPayload,
 	PaymentSucceededPayload,
 	RefundPaymentPayload,
 } from '@lib/messaging';
@@ -67,12 +69,9 @@ export class HandlePaymentEventHandler implements ICommandHandler<HandlePaymentE
 			case MESSAGE_TYPE.PAYMENT_FAILED:
 				return this.onPaymentFailed(manager, envelope);
 			case MESSAGE_TYPE.PAYMENT_REFUNDED:
+				return this.onPaymentRefunded(manager, envelope);
 			case MESSAGE_TYPE.PAYMENT_REFUND_FAILED:
-				// Kết quả hoàn tiền cập nhật refundStatus ở luồng huỷ/hoàn hàng, chưa xử lý ở đây.
-				this.logger.log(
-					`${envelope.type} cho đơn ${envelope.orderId}: ghi nhận, chưa xử lý`,
-				);
-				return;
+				return this.onPaymentRefundFailed(manager, envelope);
 			default:
 				this.logger.warn(
 					`Bỏ qua event lạ "${envelope.type}" (eventId=${envelope.eventId}) trên ${KAFKA_TOPIC.PAYMENT_EVENTS}`,
@@ -185,6 +184,117 @@ export class HandlePaymentEventHandler implements ICommandHandler<HandlePaymentE
 			OrderCancelReason.PAYMENT_FAILED,
 			{ releaseInventory: true },
 		);
+	}
+
+	/**
+	 * Kết quả hoàn tiền thành công. Số tiền ghi nhận lấy từ event (số Payment thực hoàn), không tính lại từ đơn
+	 * vì luồng thanh toán muộn hoàn toàn bộ số đã thu. Idempotent theo trạng thái: đã ghi nhận thì no-op
+	 * (Payment có thể phát lại với eventId khác).
+	 */
+	private async onPaymentRefunded(
+		manager: EntityManager,
+		envelope: MessageEnvelope,
+	): Promise<void> {
+		const order = await this.findOrder(manager, envelope);
+		if (!order) return;
+		const payload = (envelope.payload ?? {}) as Partial<PaymentRefundedPayload>;
+
+		if (order.status === OrderStatus.CANCELLED) {
+			if (order.refundStatus === OrderRefundStatus.SUCCEEDED) {
+				this.logger.debug(`PaymentRefunded trùng cho đơn ${order.id}: bỏ qua`);
+				return;
+			}
+			await this.orderTransition.updateWithVersion(manager, order, {
+				refundStatus: OrderRefundStatus.SUCCEEDED,
+				refundedAmount: this.refundedAmountOf(order, payload.amount),
+				refundedAt: new Date(),
+			});
+			return;
+		}
+
+		if (order.status === OrderStatus.REFUNDING) {
+			await this.orderTransition.transition(manager, {
+				order,
+				to: OrderStatus.REFUNDED,
+				patch: {
+					refundedAmount: this.refundedAmountOf(order, payload.amount),
+					refundedAt: new Date(),
+				},
+				// Kho chỉ nhập lại sau khi tiền đã hoàn; idempotent ở Inventory.
+				messages: [
+					{
+						topic: KAFKA_TOPIC.INVENTORY_COMMANDS,
+						type: MESSAGE_TYPE.RESTOCK_INVENTORY,
+						payload: {},
+					},
+				],
+			});
+			await manager.query(
+				`UPDATE "refunds" SET "status" = 'COMPLETED', "updatedAt" = now() WHERE "order_id" = $1 AND "status" = 'PENDING'`,
+				[order.id],
+			);
+			return;
+		}
+
+		this.logger.debug(
+			`PaymentRefunded cho đơn ${order.id} đang ${order.status}: bỏ qua`,
+		);
+	}
+
+	/**
+	 * Hoàn tiền thất bại. Đơn đã huỷ: đánh dấu FAILED để admin xử lý tay. Đơn đang hoàn hàng: giữ REFUNDING
+	 * (không có trạng thái lỗi riêng), chỉ báo lỗi để xử lý tay. Không ghi đè refundStatus đã SUCCEEDED.
+	 */
+	private async onPaymentRefundFailed(
+		manager: EntityManager,
+		envelope: MessageEnvelope,
+	): Promise<void> {
+		const order = await this.findOrder(manager, envelope);
+		if (!order) return;
+		const payload = (envelope.payload ??
+			{}) as Partial<PaymentRefundFailedPayload>;
+		const reason = payload.reason ?? 'không rõ lý do';
+
+		if (order.status === OrderStatus.CANCELLED) {
+			if (
+				order.refundStatus === OrderRefundStatus.FAILED ||
+				order.refundStatus === OrderRefundStatus.SUCCEEDED
+			) {
+				this.logger.debug(
+					`PaymentRefundFailed cho đơn ${order.id} (refundStatus=${order.refundStatus}): bỏ qua`,
+				);
+				return;
+			}
+			await this.orderTransition.updateWithVersion(manager, order, {
+				refundStatus: OrderRefundStatus.FAILED,
+			});
+			this.logger.error(
+				`Hoàn tiền thất bại cho đơn đã huỷ ${order.id}: ${reason}. Cần xử lý tay`,
+			);
+			return;
+		}
+
+		if (order.status === OrderStatus.REFUNDING) {
+			this.logger.error(
+				`Hoàn tiền thất bại cho đơn đang hoàn hàng ${order.id}: ${reason}. Đơn giữ REFUNDING, cần xử lý tay`,
+			);
+			return;
+		}
+
+		this.logger.debug(
+			`PaymentRefundFailed cho đơn ${order.id} đang ${order.status}: bỏ qua`,
+		);
+	}
+
+	/** amount không hợp lệ thì ném để runner retry rồi DLQ, không ghi số tiền hoàn sai. */
+	private refundedAmountOf(order: Order, amount: unknown): number {
+		const value = Number(amount);
+		if (!Number.isFinite(value) || value <= 0) {
+			throw new Error(
+				`PaymentRefunded cho đơn ${order.id} có amount không hợp lệ: ${String(amount)}`,
+			);
+		}
+		return value;
 	}
 
 	private async findOrder(

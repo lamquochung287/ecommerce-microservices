@@ -5,6 +5,7 @@ import {
 	IsNumber,
 	IsOptional,
 	IsString,
+	Min,
 	validateSync,
 } from 'class-validator';
 
@@ -117,6 +118,12 @@ export class EnvironmentVariables {
 	@IsOptional()
 	@IsNumber()
 	ORDER_PAYMENT_TTL_SECONDS?: number;
+
+	// Cửa sổ đổi trả tính từ deliveredAt (mặc định 7 ngày); quá hạn thì scheduler tự COMPLETED
+	@IsOptional()
+	@IsNumber()
+	@Min(1)
+	ORDER_RETURN_WINDOW_DAYS?: number;
 
 	// Khoá HMAC của webhook giao hàng; bắt buộc, không có giá trị mặc định.
 	@IsNotEmpty()

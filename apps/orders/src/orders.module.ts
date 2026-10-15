@@ -37,10 +37,20 @@ import { HandleShippingEventHandler } from './commands/handlers/handle-shipping-
 import { ShippingEventsConsumer } from './messaging/shipping-events.consumer';
 import { PaymentEventsConsumer } from './messaging/payment-events.consumer';
 import { InventoryEventsConsumer } from './messaging/inventory-events.consumer';
+import { ScheduleModule } from '@nestjs/schedule';
+import { CancelOrderHandler } from './commands/handlers/cancel-order.handler';
+import { RequestReturnHandler } from './commands/handlers/request-return.handler';
+import { ExpirePendingOrdersHandler } from './commands/handlers/expire-pending-orders.handler';
+import { CompleteDeliveredOrdersHandler } from './commands/handlers/complete-delivered-orders.handler';
+import { OrderLifecycleScheduler } from './jobs/order-lifecycle.scheduler';
 
 export const CommandHandlers = [
 	CheckoutHandler,
 	PreparePaymentHandler,
+	CancelOrderHandler,
+	RequestReturnHandler,
+	ExpirePendingOrdersHandler,
+	CompleteDeliveredOrdersHandler,
 	HandlePaymentEventHandler,
 	HandleInventoryEventHandler,
 	HandleShippingEventHandler,
@@ -65,6 +75,7 @@ export const EventHandlers = [OrderCreatedHandler];
 		CachedModule,
 		TypeOrmModule.forFeature([Order, OrderItem, Refund]),
 		CqrsModule,
+		ScheduleModule.forRoot(),
 		HealthModule,
 		MessagingModule.forService({ source: OUTBOX_SOURCE.ORDERS }),
 		SagaModule,
@@ -85,6 +96,7 @@ export const EventHandlers = [OrderCreatedHandler];
 		OrderTransitionService,
 		OrderCancellationService,
 		OrderPricingService,
+		OrderLifecycleScheduler,
 	],
 })
 export class OrdersModule {}

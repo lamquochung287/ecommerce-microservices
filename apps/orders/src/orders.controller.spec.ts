@@ -5,6 +5,8 @@ import { OrdersController } from './orders.controller';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { CheckoutCommand } from './commands/checkout.command';
 import { PreparePaymentCommand } from './commands/prepare-payment.command';
+import { CancelOrderCommand } from './commands/cancel-order.command';
+import { RequestReturnCommand } from './commands/request-return.command';
 import { CheckoutDto } from './dto/checkout.dto';
 
 describe('OrdersController', () => {
@@ -70,6 +72,28 @@ describe('OrdersController', () => {
 			expect(command).toBeInstanceOf(PreparePaymentCommand);
 			expect(command.orderId).toBe('o-1');
 			expect(command.userId).toBe('u-1');
+		});
+	});
+
+	describe('cancelOrder / requestReturn', () => {
+		it('cancelOrder chuyển payload vào CancelOrderCommand', async () => {
+			const payload = { orderId: 'o-1', userId: 'u-1' };
+			await ordersController.cancelOrder(payload);
+
+			const command = (commandBus.execute as jest.Mock).mock
+				.calls[0][0] as CancelOrderCommand;
+			expect(command).toBeInstanceOf(CancelOrderCommand);
+			expect(command.payload).toBe(payload);
+		});
+
+		it('requestReturn chuyển payload vào RequestReturnCommand', async () => {
+			const payload = { orderId: 'o-1', userId: 'u-1', reason: 'lỗi' };
+			await ordersController.requestReturn(payload);
+
+			const command = (commandBus.execute as jest.Mock).mock
+				.calls[0][0] as RequestReturnCommand;
+			expect(command).toBeInstanceOf(RequestReturnCommand);
+			expect(command.payload).toBe(payload);
 		});
 	});
 });

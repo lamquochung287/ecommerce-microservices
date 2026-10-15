@@ -52,7 +52,8 @@ function setup(orders: Array<Order | null>, updates: number[] = [1]) {
 	const update = jest.fn();
 	for (const affected of updates) update.mockResolvedValueOnce({ affected });
 	update.mockResolvedValue({ affected: 1 });
-	const manager = { findOne, update };
+	const query = jest.fn().mockResolvedValue([]);
+	const manager = { findOne, update, query };
 	const dataSource = {
 		transaction: jest.fn((cb: (m: unknown) => unknown) => cb(manager)),
 	};
@@ -321,18 +322,169 @@ describe('HandlePaymentEventHandler', () => {
 		});
 	});
 
-	describe('các message khác', () => {
-		it.each([
-			MESSAGE_TYPE.PAYMENT_REFUNDED,
-			MESSAGE_TYPE.PAYMENT_REFUND_FAILED,
-		])('%s: chỉ ghi nhận (inbox đã đánh dấu), không đổi đơn', async (type) => {
-			const { send, manager, outbox, inbox } = setup([makeOrder()]);
-			await send(type, { refundId: 'r', amount: 1 });
-			expect(inbox.tryAcquire).toHaveBeenCalledTimes(1);
+	describe('PaymentRefunded', () => {
+		it('REFUNDING -> REFUNDED kèm refundedAmount/At, Refund PENDING -> COMPLETED, RestockInventory sau hoàn tiền', async () => {
+			const { send, manager, outbox } = setup([
+				makeOrder({ status: OrderStatus.REFUNDING }),
+			]);
+			await send(MESSAGE_TYPE.PAYMENT_REFUNDED, {
+				refundId: 'r-1',
+				amount: 200000,
+			});
+
+			const [, where, set] = manager.update.mock.calls[0];
+			expect(where).toEqual({ id: ORDER, version: 1 });
+			expect(set.status).toBe(OrderStatus.REFUNDED);
+			expect(set.refundedAmount).toBe(200000);
+			expect(set.refundedAt).toBeInstanceOf(Date);
+
+			expect(manager.query).toHaveBeenCalledTimes(1);
+			const [sql, params] = manager.query.mock.calls[0];
+			expect(sql).toContain(`"status" = 'COMPLETED'`);
+			expect(sql).toContain(`"status" = 'PENDING'`);
+			expect(params).toEqual([ORDER]);
+
+			const items = appended(outbox);
+			expect(items.map((i) => i.type)).toEqual([
+				MESSAGE_TYPE.ORDER_STATUS_CHANGED,
+				MESSAGE_TYPE.RESTOCK_INVENTORY,
+			]);
+			expect(items[1]).toMatchObject({
+				topic: KAFKA_TOPIC.INVENTORY_COMMANDS,
+				orderId: ORDER,
+				payload: {},
+			});
+		});
+
+		it('CANCELLED + refundStatus PENDING -> SUCCEEDED, ghi refundedAmount từ event, status giữ, không outbox', async () => {
+			const { send, manager, outbox } = setup([
+				makeOrder({
+					status: OrderStatus.CANCELLED,
+					refundStatus: OrderRefundStatus.PENDING,
+				}),
+			]);
+			// Hoàn toàn bộ số đã thu (thanh toán muộn): khác total - ship.
+			await send(MESSAGE_TYPE.PAYMENT_REFUNDED, {
+				refundId: 'r-1',
+				amount: 230000,
+			});
+
+			const [, where, set] = manager.update.mock.calls[0];
+			expect(where).toEqual({ id: ORDER, version: 1 });
+			expect(set.status).toBeUndefined();
+			expect(set.refundStatus).toBe(OrderRefundStatus.SUCCEEDED);
+			expect(set.refundedAmount).toBe(230000);
+			expect(set.refundedAt).toBeInstanceOf(Date);
+			expect(outbox.append).not.toHaveBeenCalled();
+			expect(manager.query).not.toHaveBeenCalled();
+		});
+
+		it('CANCELLED + refundStatus FAILED rồi hoàn lại thành công -> SUCCEEDED', async () => {
+			const { send, manager } = setup([
+				makeOrder({
+					status: OrderStatus.CANCELLED,
+					refundStatus: OrderRefundStatus.FAILED,
+				}),
+			]);
+			await send(MESSAGE_TYPE.PAYMENT_REFUNDED, { amount: 200000 });
+			expect(manager.update.mock.calls[0][2].refundStatus).toBe(
+				OrderRefundStatus.SUCCEEDED,
+			);
+		});
+
+		it('đã SUCCEEDED (phát lại với eventId khác) hoặc đã REFUNDED: no-op', async () => {
+			const done = setup([
+				makeOrder({
+					status: OrderStatus.CANCELLED,
+					refundStatus: OrderRefundStatus.SUCCEEDED,
+				}),
+			]);
+			await done.send(MESSAGE_TYPE.PAYMENT_REFUNDED, { amount: 200000 });
+			expect(done.manager.update).not.toHaveBeenCalled();
+
+			const refunded = setup([makeOrder({ status: OrderStatus.REFUNDED })]);
+			await refunded.send(MESSAGE_TYPE.PAYMENT_REFUNDED, { amount: 200000 });
+			expect(refunded.manager.update).not.toHaveBeenCalled();
+			expect(refunded.outbox.append).not.toHaveBeenCalled();
+		});
+
+		it('trạng thái khác (vd DELIVERED): no-op', async () => {
+			const { send, manager, outbox } = setup([
+				makeOrder({ status: OrderStatus.DELIVERED }),
+			]);
+			await send(MESSAGE_TYPE.PAYMENT_REFUNDED, { amount: 200000 });
 			expect(manager.update).not.toHaveBeenCalled();
 			expect(outbox.append).not.toHaveBeenCalled();
 		});
 
+		it('amount không hợp lệ: ném để retry rồi DLQ, không ghi số sai', async () => {
+			const { send, manager, producer } = setup([
+				makeOrder({ status: OrderStatus.REFUNDING }),
+			]);
+			await send(MESSAGE_TYPE.PAYMENT_REFUNDED, { refundId: 'r', amount: 'x' });
+			expect(manager.update).not.toHaveBeenCalled();
+			expect(producer.send).toHaveBeenCalled(); // DLQ sau khi hết lượt retry
+		});
+
+		it('lệch version lần 1 rồi đọc lại: vẫn ghi nhận đúng', async () => {
+			const order = makeOrder({
+				status: OrderStatus.CANCELLED,
+				refundStatus: OrderRefundStatus.PENDING,
+			});
+			const { send, manager } = setup(
+				[order, { ...order, version: 2 }],
+				[0, 1],
+			);
+			await send(MESSAGE_TYPE.PAYMENT_REFUNDED, { amount: 200000 });
+			expect(manager.update).toHaveBeenCalledTimes(2);
+			expect(manager.update.mock.calls[1][1]).toEqual({
+				id: ORDER,
+				version: 2,
+			});
+		});
+	});
+
+	describe('PaymentRefundFailed', () => {
+		it('CANCELLED + PENDING -> refundStatus FAILED, status giữ', async () => {
+			const { send, manager, outbox } = setup([
+				makeOrder({
+					status: OrderStatus.CANCELLED,
+					refundStatus: OrderRefundStatus.PENDING,
+				}),
+			]);
+			await send(MESSAGE_TYPE.PAYMENT_REFUND_FAILED, { reason: 'bank down' });
+
+			const [, where, set] = manager.update.mock.calls[0];
+			expect(where).toEqual({ id: ORDER, version: 1 });
+			expect(set.status).toBeUndefined();
+			expect(set.refundStatus).toBe(OrderRefundStatus.FAILED);
+			expect(outbox.append).not.toHaveBeenCalled();
+		});
+
+		it('REFUNDING: giữ nguyên, không đổi đơn, không restock', async () => {
+			const { send, manager, outbox } = setup([
+				makeOrder({ status: OrderStatus.REFUNDING }),
+			]);
+			await send(MESSAGE_TYPE.PAYMENT_REFUND_FAILED, { reason: 'bank down' });
+			expect(manager.update).not.toHaveBeenCalled();
+			expect(outbox.append).not.toHaveBeenCalled();
+		});
+
+		it('đã SUCCEEDED hoặc đã FAILED: no-op (không lùi trạng thái)', async () => {
+			for (const refundStatus of [
+				OrderRefundStatus.SUCCEEDED,
+				OrderRefundStatus.FAILED,
+			]) {
+				const { send, manager } = setup([
+					makeOrder({ status: OrderStatus.CANCELLED, refundStatus }),
+				]);
+				await send(MESSAGE_TYPE.PAYMENT_REFUND_FAILED, { reason: 'x' });
+				expect(manager.update).not.toHaveBeenCalled();
+			}
+		});
+	});
+
+	describe('các message khác', () => {
 		it('type lạ: không throw, không đổi đơn', async () => {
 			const { send, manager, producer } = setup([makeOrder()]);
 			await expect(send('SomethingElse')).resolves.toBeUndefined();

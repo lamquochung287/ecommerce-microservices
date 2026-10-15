@@ -12,7 +12,10 @@ import { GetOrderQuery } from './queries/get-order.query';
 import { GetRefundsQuery } from './queries/get-refunds.query';
 import { CheckoutCommand } from './commands/checkout.command';
 import { PreparePaymentCommand } from './commands/prepare-payment.command';
+import { CancelOrderCommand } from './commands/cancel-order.command';
+import { RequestReturnCommand } from './commands/request-return.command';
 import { CheckoutDto } from './dto/checkout.dto';
+import { CancelOrderDto, RequestReturnDto } from './dto/order-actions.dto';
 import { CreateOrderDto, UpdateOrderStatusDto } from './dto/order.dto';
 import { CreateRefundDto } from './dto/refund.dto';
 
@@ -46,6 +49,17 @@ export class OrdersController {
 		return this.commandBus.execute(
 			new PreparePaymentCommand(payload.orderId, payload.userId),
 		);
+	}
+
+	// userId do Gateway gắn từ token; Orders tự kiểm tra chủ sở hữu.
+	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.CANCEL_ORDER }, Transport.TCP)
+	async cancelOrder(@Payload() payload: CancelOrderDto) {
+		return this.commandBus.execute(new CancelOrderCommand(payload));
+	}
+
+	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.REQUEST_RETURN }, Transport.TCP)
+	async requestReturn(@Payload() payload: RequestReturnDto) {
+		return this.commandBus.execute(new RequestReturnCommand(payload));
 	}
 
 	@MessagePattern({ cmd: ORDER_MESSAGE_PATTERN.GET_ORDERS }, Transport.TCP)
