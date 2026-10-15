@@ -110,6 +110,15 @@
         "tsConfigPath": "apps/inventory/tsconfig.app.json"
       }
     },
+    "shipping": {
+      "type": "application",
+      "root": "apps/shipping",
+      "entryFile": "main",
+      "sourceRoot": "apps/shipping/src",
+      "compilerOptions": {
+        "tsConfigPath": "apps/shipping/tsconfig.app.json"
+      }
+    },
     "promotion": {
       "type": "application",
       "root": "apps/promotion",
