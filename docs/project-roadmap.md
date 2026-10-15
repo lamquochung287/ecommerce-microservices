@@ -261,6 +261,19 @@ Không có vấn đề backward compatibility; các phase sau đều dựa trên
 | **Pessimistic locking (Promotion)** | Quan trọng: tránh voucher dùng vượt giới hạn; thời gian lock ngắn nên chấp nhận được | ✅ Đã implement |
 | **Không dùng SMS OTP** | Email OTP đã đủ; SMS tốn thêm chi phí/độ phức tạp | ✅ Đã quyết định, dùng Email |
 
+### Quyết định đã chốt 2026-10-15 (thiết kế đích, chưa implement)
+
+Chi tiết: [target-checkout-architecture.md](./target-checkout-architecture.md).
+
+| Quyết định | Lý do | Trạng thái |
+|----------|-----------|--------|
+| **Thêm Kafka cho event/command bất đồng bộ** (đảo quyết định "không dùng RabbitMQ" ở trên; RPC đồng bộ vẫn TCP) | Outbox TCP hiện at-most-once, mất event là kẹt đơn; luồng orchestrated cần at-least-once + inbox | 🎯 Chốt, chưa implement |
+| **Tách `apps/inventory` (:3008)** với reserve/commit/release + TTL 15' | Hết trừ kho thật lúc checkout; tự dọn đơn bỏ dở | 🎯 Chốt, chưa implement |
+| **Thêm `apps/shipping` (:3009)**, carrier mô phỏng | Có vòng đời SHIPPED/DELIVERED thật | 🎯 Chốt, chưa implement |
+| **State machine mới** PENDING_PAYMENT→PAID→FULFILLING→SHIPPED→DELIVERED→COMPLETED (+REFUNDING→REFUNDED) | Khớp luồng orchestrated | 🎯 Chốt, chưa implement |
+| **Chỉ Simulated cho Payment/Shipping** (không tích hợp ngoài), nhưng đi qua intent + webhook HMAC thật; hoãn vnpay/momo | Học pattern không vướng tài khoản bên thứ 3; thay cổng thật sau chỉ cần thêm provider | 🎯 Chốt, chưa implement |
+| **Payment async** (`createIntent` + webhook), nối Voucher, job hết hạn/auto COMPLETED | Loại bỏ cửa sổ lỗi charge-timeout/đơn kẹt PENDING | 🎯 Chốt, chưa implement |
+
 ### Quyết định cần chốt (Phase 3 sắp tới)
 
 Các câu hỏi thiết kế còn mở (nguồn giá, hoàn kho khi huỷ, voucher trong saga, payment async, ownership check, refresh token): xem [design-trade-offs.md §7](./design-trade-offs.md#7-quyết-định-đã-chốt-vs-cần-chốt).

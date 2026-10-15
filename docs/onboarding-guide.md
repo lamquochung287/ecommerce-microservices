@@ -21,6 +21,7 @@
 | [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) | Saga/Outbox/locking chi tiết, sequence checkout | Deep-dive | 15' |
 | [system-architecture-auth-flow.md](./system-architecture-auth-flow.md) | Login, verify token, logout, RBAC | Deep-dive | 10' |
 | [system-architecture-gateway-flow.md](./system-architecture-gateway-flow.md) | Middleware chain, envelope request/response | Deep-dive | 10' |
+| [target-checkout-architecture.md](./target-checkout-architecture.md) | Checkout/fulfillment **sẽ** thiết kế lại thế nào (Kafka, Inventory, Shipping)? Chưa implement | Thiết kế đích | 15' |
 | [code-standards.md](./code-standards.md) | Viết code theo quy ước nào? CQRS structure | Quy ước | 15' |
 | [project-roadmap.md](./project-roadmap.md) | Đã làm gì, còn gì, gap nào? | Kế hoạch | 10' |
 | `apps/<app>/CLAUDE.md` | Quy tắc + gotcha riêng của 1 service | Cô đọng | 3'/file |

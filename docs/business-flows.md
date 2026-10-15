@@ -5,6 +5,8 @@
 
 Tài liệu mô tả **luồng nghiệp vụ end-to-end** (nhiều service phối hợp) và **business rules** đang được code thực thi. Chi tiết xử lý bên trong từng service xem [module-processing-flows.md](./module-processing-flows.md). Các lựa chọn thiết kế và đánh đổi xem [design-trade-offs.md](./design-trade-offs.md).
 
+> Luồng checkout/state machine dưới đây là **hiện trạng**; thiết kế đích (chưa code) xem [target-checkout-architecture.md](./target-checkout-architecture.md).
+>
 > Quy ước: **[ĐÃ CÓ]** = code đang thực thi; **[CHƯA CÓ]** = nghiệp vụ mong đợi nhưng code chưa làm (ghi rõ để tránh hiểu nhầm).
 
 ---
@@ -270,3 +272,4 @@ Admin ─ (TCP) GET_SENT_NOTIFICATIONS {recipient?} → lịch sử gửi  [chư
 - [design-trade-offs.md](./design-trade-offs.md) — quyết định thiết kế, đánh đổi, gap
 - [system-architecture.md](./system-architecture.md) — kiến trúc tổng thể
 - [system-architecture-orders-flow.md](./system-architecture-orders-flow.md) — Saga/Outbox chi tiết
+- [target-checkout-architecture.md](./target-checkout-architecture.md) — **thiết kế đích (chưa implement)**: checkout reserve + payment async, Kafka, Inventory/Shipping, state machine mới
