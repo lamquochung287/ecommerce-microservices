@@ -11,6 +11,7 @@ import { KAFKA_TOPIC, MESSAGE_TYPE } from 'libs/constant/kafka.constant';
 import { CartService } from '../../cart/cart.service';
 import { InventoryClient } from '../../clients/inventory.client';
 import { PaymentClient } from '../../clients/payment.client';
+import { PromotionClient } from '../../clients/promotion.client';
 import { CheckoutDto } from '../../dto/checkout.dto';
 import { Order, OrderStatus } from '../../entities/order.entity';
 import { OrderItem } from '../../entities/order-item.entity';
@@ -41,7 +42,7 @@ const badRequest = (message: string) =>
 
 /**
  * Checkout đồng bộ tới khi có payment_url. Thứ tự là bất biến:
- * validate -> giá server -> reserve kho (kèm thay thế đơn chờ cũ) -> TX tạo đơn + outbox
+ * validate -> giá server (+ discount voucher) -> reserve kho (kèm thay thế đơn chờ cũ) -> reserve voucher -> TX tạo đơn + outbox
  * -> chốt #1 (reservation còn hiệu lực) -> tạo payment intent.
  * Cart không bị đụng: chỉ trừ khi thanh toán thành công.
  */
@@ -56,6 +57,7 @@ export class CheckoutHandler implements ICommandHandler<CheckoutCommand> {
 		private readonly pricing: OrderPricingService,
 		private readonly inventory: InventoryClient,
 		private readonly payment: PaymentClient,
+		private readonly promotion: PromotionClient,
 		private readonly outboxWriter: OutboxWriter,
 		private readonly orderTransition: OrderTransitionService,
 		private readonly cancellation: OrderCancellationService,
@@ -86,8 +88,8 @@ export class CheckoutHandler implements ICommandHandler<CheckoutCommand> {
 			return { productId: inCart.productId, quantity: inCart.quantity };
 		});
 
-		// Voucher chưa nối vào checkout: discount cố định 0.
-		const priced = await this.pricing.priceItems(lines, 0);
+		const voucherCode = dto.voucherCode?.trim() || undefined;
+		const priced = await this.pricing.priceItems(lines, voucherCode);
 
 		const orderId = randomUUID();
 		const replaces = await this.findReplaceableOrderIds(userId, productIds);
@@ -105,6 +107,21 @@ export class CheckoutHandler implements ICommandHandler<CheckoutCommand> {
 		});
 		const expiresAt = new Date(reservation.expiresAt);
 
+		// Giữ lượt voucher sau khi giữ kho. Lỗi (hết lượt, vừa hết hạn...) -> trả kho rồi ném lỗi gốc.
+		if (priced.voucherCode) {
+			try {
+				await this.promotion.reserve({
+					code: priced.voucherCode,
+					orderId,
+					userId,
+					orderValue: priced.subtotal,
+				});
+			} catch (error) {
+				await this.releaseBestEffort(orderId);
+				throw error;
+			}
+		}
+
 		let order: Order;
 		try {
 			order = await this.createOrder(
@@ -117,6 +134,7 @@ export class CheckoutHandler implements ICommandHandler<CheckoutCommand> {
 			);
 		} catch (error) {
 			await this.releaseBestEffort(orderId);
+			if (priced.voucherCode) await this.releaseVoucherBestEffort(orderId);
 			throw error;
 		}
 
@@ -185,6 +203,7 @@ export class CheckoutHandler implements ICommandHandler<CheckoutCommand> {
 				subtotal: priced.subtotal,
 				taxAmount: priced.taxAmount,
 				shippingFee: priced.shippingFee,
+				voucherCode: priced.voucherCode,
 				discountAmount: priced.discountAmount,
 				totalAmount: priced.totalAmount,
 				items: priced.items.map((line) => {
@@ -280,6 +299,17 @@ export class CheckoutHandler implements ICommandHandler<CheckoutCommand> {
 			// Reservation vẫn tự hết hạn và job dọn của Inventory sẽ trả kho.
 			this.logger.error(
 				`Release inventory thất bại cho đơn ${orderId}: ${errorMessage(error)}`,
+			);
+		}
+	}
+
+	private async releaseVoucherBestEffort(orderId: string): Promise<void> {
+		try {
+			await this.promotion.release(orderId);
+		} catch (error) {
+			// Lượt có thể bị giữ lại tới khi xử lý tay; không được che lỗi gốc của checkout.
+			this.logger.error(
+				`Release voucher thất bại cho đơn ${orderId}: ${errorMessage(error)}`,
 			);
 		}
 	}

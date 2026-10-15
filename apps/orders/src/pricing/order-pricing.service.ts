@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { RpcException } from '@nestjs/microservices';
 import { ProductClient, ProductSnapshot } from '../clients/product.client';
+import { PromotionClient } from '../clients/promotion.client';
 import { round2, toMoney } from './money';
 
 const DEFAULT_TAX_RATE = 0.1;
@@ -26,6 +27,8 @@ export interface OrderTotals {
 
 export interface PricedOrder extends OrderTotals {
 	items: PricedLine[];
+	/** Có khi voucher đã được Promotion xác nhận hợp lệ cho subtotal này. */
+	voucherCode: string | null;
 }
 
 /**
@@ -36,12 +39,17 @@ export interface PricedOrder extends OrderTotals {
 export class OrderPricingService {
 	constructor(
 		private readonly products: ProductClient,
+		private readonly promotion: PromotionClient,
 		private readonly config: ConfigService,
 	) {}
 
+	/**
+	 * Có voucherCode: Promotion tính discount trên subtotal (không giữ lượt); lỗi 404/400 của Promotion
+	 * đi thẳng ra ngoài. total = subtotal + tax + ship − discount.
+	 */
 	async priceItems(
 		lines: PricingLine[],
-		discountAmount = 0,
+		voucherCode?: string,
 	): Promise<PricedOrder> {
 		const items = await Promise.all(
 			lines.map(async (line) => ({
@@ -49,7 +57,17 @@ export class OrderPricingService {
 				unitPrice: await this.unitPriceOf(line.productId),
 			})),
 		);
-		return { items, ...this.computeTotals(items, discountAmount) };
+		let discountAmount = 0;
+		if (voucherCode) {
+			const { subtotal } = this.computeTotals(items);
+			const result = await this.promotion.validate(voucherCode, subtotal);
+			discountAmount = toMoney(result.discountAmount);
+		}
+		return {
+			items,
+			voucherCode: voucherCode ?? null,
+			...this.computeTotals(items, discountAmount),
+		};
 	}
 
 	computeTotals(items: PricedLine[], discountAmount = 0): OrderTotals {

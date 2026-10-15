@@ -24,7 +24,12 @@ const address = {
 	country: 'VN',
 };
 
-function buildHandler(ds: DataSource, userId: string, productIds: string[]) {
+function buildHandler(
+	ds: DataSource,
+	userId: string,
+	productIds: string[],
+	voucher?: { code: string; discount: number },
+) {
 	const outbox = new OutboxWriter({ source: SOURCE });
 	const transition = new OrderTransitionService(outbox);
 	const inventory = {
@@ -47,6 +52,10 @@ function buildHandler(ds: DataSource, userId: string, productIds: string[]) {
 			}),
 		),
 	};
+	const promotion = {
+		reserve: jest.fn().mockResolvedValue({}),
+		release: jest.fn().mockResolvedValue({ released: true }),
+	};
 	const handler = new CheckoutHandler(
 		ds,
 		{ get: (_k: string, fallback?: unknown) => fallback } as ConfigService,
@@ -63,18 +72,20 @@ function buildHandler(ds: DataSource, userId: string, productIds: string[]) {
 					subtotal: 100 * lines.length,
 					taxAmount: 10 * lines.length,
 					shippingFee: 30,
-					discountAmount: 0,
-					totalAmount: 110 * lines.length + 30,
+					voucherCode: voucher?.code ?? null,
+					discountAmount: voucher?.discount ?? 0,
+					totalAmount: 110 * lines.length + 30 - (voucher?.discount ?? 0),
 				}),
 			),
 		} as never,
 		inventory as never,
 		payment as never,
+		promotion as never,
 		outbox,
 		transition,
 		new OrderCancellationService(transition),
 	);
-	return { handler, inventory };
+	return { handler, inventory, promotion };
 }
 
 describeWithDb('CheckoutHandler (postgres)', ({ it }) => {
@@ -152,6 +163,66 @@ describeWithDb('CheckoutHandler (postgres)', ({ it }) => {
 				]),
 			);
 			expect(types).not.toContain('ReleaseInventory');
+		} finally {
+			await ds.query(`DELETE FROM outbox WHERE "source" = $1`, [SOURCE]);
+			if (created.length) {
+				await ds.query(`DELETE FROM orders WHERE id = ANY($1::uuid[])`, [
+					created,
+				]);
+			}
+		}
+	});
+
+	it('đơn có voucher: lưu voucherCode + discountAmount; đơn bị thay thế phát OrderCancelled{paid:false, voucherCode} cùng TX', async (ds) => {
+		const userId = randomUUID();
+		const productId = randomUUID();
+		const created: string[] = [];
+
+		try {
+			const first = buildHandler(ds, userId, [productId], {
+				code: 'OLDCODE',
+				discount: 11,
+			});
+			const one = await first.handler.execute(
+				new CheckoutCommand(userId, {
+					items: [{ productId }],
+					shippingAddress: address,
+					voucherCode: 'OLDCODE',
+				}),
+			);
+			created.push(one.orderId);
+			expect(first.promotion.reserve).toHaveBeenCalledWith(
+				expect.objectContaining({ code: 'OLDCODE', orderId: one.orderId }),
+			);
+
+			const again = buildHandler(ds, userId, [productId]);
+			const two = await again.handler.execute(
+				new CheckoutCommand(userId, {
+					items: [{ productId }],
+					shippingAddress: address,
+				}),
+			);
+			created.push(two.orderId);
+
+			const [saved] = await ds.query(
+				`SELECT "voucherCode", "discountAmount", "totalAmount", status FROM orders WHERE id = $1`,
+				[one.orderId],
+			);
+			expect(saved).toMatchObject({
+				voucherCode: 'OLDCODE',
+				status: 'CANCELLED',
+			});
+			expect(Number(saved.discountAmount)).toBe(11);
+			expect(Number(saved.totalAmount)).toBe(129); // 110 + 30 - 11
+
+			const cancelled = await ds.query(
+				`SELECT payload::text AS payload FROM outbox
+				 WHERE "source" = $1 AND "key" = $2 AND "eventType" = 'OrderCancelled'`,
+				[SOURCE, one.orderId],
+			);
+			expect(cancelled).toHaveLength(1);
+			expect(cancelled[0].payload).toContain('OLDCODE');
+			expect(cancelled[0].payload).toContain('"paid": false');
 		} finally {
 			await ds.query(`DELETE FROM outbox WHERE "source" = $1`, [SOURCE]);
 			if (created.length) {

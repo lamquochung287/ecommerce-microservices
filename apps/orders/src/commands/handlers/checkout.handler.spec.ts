@@ -13,6 +13,7 @@ import { KAFKA_TOPIC, MESSAGE_TYPE } from 'libs/constant/kafka.constant';
 import { CartService } from '../../cart/cart.service';
 import { InventoryClient } from '../../clients/inventory.client';
 import { PaymentClient } from '../../clients/payment.client';
+import { PromotionClient } from '../../clients/promotion.client';
 import { OrderStatus } from '../../entities/order.entity';
 import { OrderCancellationService } from '../../order-state/order-cancellation.service';
 import { OrderTransitionService } from '../../order-state/order-transition.service';
@@ -41,6 +42,7 @@ function setup(
 		cartItems?: { productId: string; quantity: number }[];
 		replaceRows?: { id: string }[];
 		env?: Record<string, unknown>;
+		voucherDiscount?: number;
 	} = {},
 ) {
 	const manager = {
@@ -64,6 +66,16 @@ function setup(
 			],
 		}),
 	};
+	const discount = opts.voucherDiscount ?? 25000;
+	const promotion = {
+		validate: jest
+			.fn()
+			.mockResolvedValue({ code: 'SALE10', discountAmount: discount }),
+		reserve: jest
+			.fn()
+			.mockResolvedValue({ code: 'SALE10', discountAmount: discount }),
+		release: jest.fn().mockResolvedValue({ released: true }),
+	};
 	const priceOf: Record<string, number> = { [A]: 100000, [B]: 50000, [C]: 1 };
 	const pricing = new OrderPricingService(
 		{
@@ -78,6 +90,7 @@ function setup(
 					: Promise.resolve({ id, price: String(priceOf[id]), isActive: true }),
 			),
 		} as never,
+		promotion as unknown as PromotionClient,
 		{
 			get: (key: string) =>
 				({ ORDER_TAX_RATE: '0.1', ORDER_SHIPPING_FEE_FLAT: '30000' })[key],
@@ -123,6 +136,7 @@ function setup(
 		pricing,
 		inventory as unknown as InventoryClient,
 		payment as unknown as PaymentClient,
+		promotion as unknown as PromotionClient,
 		{ append } as unknown as OutboxWriter,
 		orderTransition,
 		cancellation,
@@ -134,6 +148,7 @@ function setup(
 		cartApi,
 		inventory,
 		payment,
+		promotion,
 		append,
 		transition,
 		updateWithVersion,
@@ -428,5 +443,160 @@ describe('CheckoutHandler', () => {
 		const ctx = setup({ env: { ORDER_PAYMENT_TTL_SECONDS: '120' } });
 		await run(ctx.handler, [{ productId: A }]);
 		expect(ctx.inventory.reserve.mock.calls[0][0].ttlSeconds).toBe(120);
+	});
+
+	describe('voucher', () => {
+		it('discount lưu lên Order, total trừ discount, intent theo total; RESERVE_VOUCHER gọi SAU Inventory.RESERVE với orderValue = subtotal', async () => {
+			const ctx = setup();
+
+			const result = await run(
+				ctx.handler,
+				[{ productId: A }, { productId: B }],
+				{ voucherCode: ' SALE10 ' },
+			);
+
+			expect(ctx.promotion.validate).toHaveBeenCalledWith('SALE10', 250000);
+			expect(ctx.promotion.reserve).toHaveBeenCalledWith({
+				code: 'SALE10',
+				orderId: result.orderId,
+				userId: USER,
+				orderValue: 250000,
+			});
+			expect(ctx.inventory.reserve.mock.invocationCallOrder[0]).toBeLessThan(
+				ctx.promotion.reserve.mock.invocationCallOrder[0],
+			);
+			expect(ctx.promotion.reserve.mock.invocationCallOrder[0]).toBeLessThan(
+				ctx.manager.save.mock.invocationCallOrder[0],
+			);
+
+			const created = ctx.manager.create.mock.calls[0][1];
+			expect(created).toMatchObject({
+				voucherCode: 'SALE10',
+				subtotal: 250000,
+				taxAmount: 25000,
+				shippingFee: 30000,
+				discountAmount: 25000,
+				totalAmount: 280000, // 250000 + 25000 + 30000 - 25000
+			});
+			expect(ctx.payment.createIntent.mock.calls[0][0].amount).toBe(280000);
+			expect(ctx.promotion.release).not.toHaveBeenCalled();
+		});
+
+		it('không voucher: không gọi Promotion, voucherCode null', async () => {
+			const ctx = setup();
+			await run(ctx.handler, [{ productId: A }]);
+			expect(ctx.promotion.validate).not.toHaveBeenCalled();
+			expect(ctx.promotion.reserve).not.toHaveBeenCalled();
+			expect(ctx.manager.create.mock.calls[0][1].voucherCode).toBeNull();
+		});
+
+		it('validate lỗi 400 -> ném lỗi gốc, chưa reserve kho', async () => {
+			const ctx = setup();
+			ctx.promotion.validate.mockRejectedValue(
+				new RpcException({ statusCode: 400, message: 'Voucher hết hạn' }),
+			);
+			const error = await run(ctx.handler, [{ productId: A }], {
+				voucherCode: 'SALE10',
+			}).catch((e) => e);
+			expect(statusOf(error)).toBe(400);
+			expect(ctx.inventory.reserve).not.toHaveBeenCalled();
+		});
+
+		it('RESERVE_VOUCHER lỗi (hết lượt) -> Inventory.RELEASE(orderId), ném lỗi gốc 400, không tạo đơn', async () => {
+			const ctx = setup();
+			ctx.promotion.reserve.mockRejectedValue(
+				new RpcException({ statusCode: 400, message: 'Voucher đã hết lượt' }),
+			);
+
+			const error = await run(ctx.handler, [{ productId: A }], {
+				voucherCode: 'SALE10',
+			}).catch((e) => e);
+
+			expect(statusOf(error)).toBe(400);
+			const orderId = ctx.inventory.reserve.mock.calls[0][0].orderId;
+			expect(ctx.inventory.release).toHaveBeenCalledWith(orderId);
+			expect(ctx.dataSource.transaction).not.toHaveBeenCalled();
+			expect(ctx.promotion.release).not.toHaveBeenCalled();
+			expect(ctx.payment.createIntent).not.toHaveBeenCalled();
+		});
+
+		it('RESERVE_VOUCHER lỗi và Inventory.RELEASE cũng lỗi -> vẫn ném lỗi gốc của voucher', async () => {
+			const ctx = setup();
+			const voucherError = new RpcException({
+				statusCode: 404,
+				message: 'Voucher không tồn tại',
+			});
+			ctx.promotion.reserve.mockRejectedValue(voucherError);
+			ctx.inventory.release.mockRejectedValue(new Error('inventory down'));
+			await expect(
+				run(ctx.handler, [{ productId: A }], { voucherCode: 'SALE10' }),
+			).rejects.toBe(voucherError);
+		});
+
+		it('TX tạo đơn lỗi -> release cả Inventory và Voucher (best-effort), ném lỗi gốc', async () => {
+			const ctx = setup();
+			const boom = new Error('insert failed');
+			ctx.manager.save.mockRejectedValue(boom);
+			ctx.promotion.release.mockRejectedValue(new Error('promotion down'));
+
+			await expect(
+				run(ctx.handler, [{ productId: A }], { voucherCode: 'SALE10' }),
+			).rejects.toBe(boom);
+
+			const orderId = ctx.inventory.reserve.mock.calls[0][0].orderId;
+			expect(ctx.inventory.release).toHaveBeenCalledWith(orderId);
+			expect(ctx.promotion.release).toHaveBeenCalledWith(orderId);
+		});
+
+		it('TX tạo đơn lỗi, không voucher -> không gọi Promotion.release', async () => {
+			const ctx = setup();
+			ctx.manager.save.mockRejectedValue(new Error('insert failed'));
+			await run(ctx.handler, [{ productId: A }]).catch(() => undefined);
+			expect(ctx.promotion.release).not.toHaveBeenCalled();
+		});
+
+		it('thay thế đơn cũ có voucher -> OrderCancelled{paid:false, voucherCode} của đơn cũ', async () => {
+			const ctx = setup({ replaceRows: [{ id: OLD }] });
+			ctx.manager.findOne.mockResolvedValue({
+				id: OLD,
+				userId: USER,
+				status: OrderStatus.PENDING_PAYMENT,
+				version: 2,
+				voucherCode: 'OLDCODE',
+			});
+
+			await run(ctx.handler, [{ productId: A }], { voucherCode: 'SALE10' });
+
+			const [, input] = ctx.transition.mock.calls[0];
+			const cancelled = input.messages.find(
+				(m: any) => m.type === MESSAGE_TYPE.ORDER_CANCELLED,
+			);
+			expect(cancelled.payload).toEqual({
+				userId: USER,
+				paid: false,
+				cancelReason: 'REPLACED',
+				voucherCode: 'OLDCODE',
+			});
+		});
+
+		it('chốt #1 invalid với đơn có voucher -> OrderCancelled{paid:false, voucherCode} để trả lượt', async () => {
+			const ctx = setup();
+			ctx.inventory.checkReservation.mockResolvedValue({
+				valid: false,
+				status: 'EXPIRED',
+				expiresAt: EXPIRES,
+			});
+			await run(ctx.handler, [{ productId: A }], {
+				voucherCode: 'SALE10',
+			}).catch(() => undefined);
+			const [, input] = ctx.transition.mock.calls[0];
+			const cancelled = input.messages.find(
+				(m: any) => m.type === MESSAGE_TYPE.ORDER_CANCELLED,
+			);
+			expect(cancelled.payload).toMatchObject({
+				paid: false,
+				voucherCode: 'SALE10',
+			});
+		});
 	});
 });

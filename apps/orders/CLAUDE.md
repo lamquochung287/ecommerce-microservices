@@ -31,5 +31,6 @@ Tạo khi order ∈ {PAID,SHIPPED,DELIVERED}; Σ refund không-REJECTED + amount
 ## Gotchas
 - Orders **tin `unitPrice` và `userId` trong DTO** (an toàn chỉ khi đi qua `/cart/checkout`). Khi sửa: tự lấy giá từ Product.
 - Cửa sổ lỗi: crash sau reserve → kho mất; charge OK nhưng timeout → đơn bị huỷ dù đã trừ tiền; chưa có job quét `PENDING`.
-- `GetOrders` không `userId` trả toàn bộ, không phân trang. Voucher chưa tích hợp. Order không lưu transactionId/discount.
+- `GetOrders` không `userId` trả toàn bộ, không phân trang. Order không lưu transactionId.
 - `OrderCreatedHandler` chỉ `console.log`.
+- Voucher (checkout v2): `OrderPricingService` gọi `Promotion.VALIDATE_VOUCHER` (subtotal) -> `total = subtotal + tax + ship − discount`; `CheckoutHandler` gọi `RESERVE_VOUCHER` SAU `Inventory.RESERVE` (lỗi -> `Inventory.RELEASE` + ném lỗi gốc; TX lỗi -> release kho và voucher best-effort). `voucherCode`/`discountAmount` lưu trên Order; `OrderPaid`/`OrderCancelled` mang `voucherCode`; chỉ `OrderCancelled{paid:false}` (huỷ/hết hạn/bị thay thế) trả lượt, đơn đã thanh toán thì không. `refundAmountOf = totalAmount − shippingFee`. Crash giữa RESERVE_VOUCHER và TX tạo đơn làm lượt bị giữ vĩnh viễn (chấp nhận).
