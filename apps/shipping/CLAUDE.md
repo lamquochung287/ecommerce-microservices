@@ -21,7 +21,7 @@ Consumer group `shipping-service` nghe `shipping-commands` (`ShippingCommandsCon
 
 ## Pattern TCP (`SHIPPING_MESSAGE_PATTERN`, luôn gắn `Transport.TCP`)
 - `HANDLE_WEBHOOK {payload:{eventId, orderId, trackingCode, status:'DELIVERED', deliveredAt}, signature}`: verify HMAC-SHA256 (`SHIPPING_WEBHOOK_SECRET`, `timingSafeEqual`, ký trên `JSON.stringify(payload)`) -> sai 400; kiểm schema payload (400); inbox `(shipping-webhook, eventId)` trùng -> `{alreadyProcessed:true}`; shipment `CREATED` -> `DELIVERED` + outbox `ShipmentDelivered{deliveredAt}`; trạng thái khác -> no-op; không có shipment -> 404.
-- `SIMULATE_DELIVERY {orderId}`: `NODE_ENV=production` -> 404; ngược lại dựng payload `eventId=${shipmentId}:delivered`, ký, chạy `HandleShippingWebhook` (cùng đường verify).
+- `SIMULATE_DELIVERY {orderId}`: `NODE_ENV=production` -> 404; ngược lại dựng payload `eventId` = UUID tất định từ `shipmentId` (`simulatedDeliveryEventId`, cột inbox là uuid), ký, chạy `HandleShippingWebhook` (cùng đường verify).
 - `GET_SHIPMENT {orderId}`: trả vận đơn hoặc 404.
 
 ## Env

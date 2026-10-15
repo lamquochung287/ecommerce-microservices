@@ -21,6 +21,7 @@ import { CancelShipmentCommand } from '../src/commands/cancel-shipment.command';
 import { CreateShipmentCommand } from '../src/commands/create-shipment.command';
 import { CancelShipmentHandler } from '../src/commands/handlers/cancel-shipment.handler';
 import { CreateShipmentHandler } from '../src/commands/handlers/create-shipment.handler';
+import { simulatedDeliveryEventId } from '../src/commands/handlers/simulate-delivery.handler';
 import { HandleShippingCommandMessageHandler } from '../src/commands/handlers/handle-shipping-command-message.handler';
 import { HandleShippingWebhookHandler } from '../src/commands/handlers/handle-shipping-webhook.handler';
 import { HandleShippingCommandMessage } from '../src/commands/handle-shipping-command-message.command';
@@ -87,9 +88,9 @@ function build(ds: DataSource, simMode: 'success' | 'fail') {
 }
 
 async function shipmentOf(ds: DataSource, orderId: string) {
-	const rows: { status: string; trackingCode: string | null }[] =
+	const rows: { id: string; status: string; trackingCode: string | null }[] =
 		await ds.query(
-			`SELECT "status", "trackingCode" FROM "shipments" WHERE "orderId" = $1`,
+			`SELECT "id", "status", "trackingCode" FROM "shipments" WHERE "orderId" = $1`,
 			[orderId],
 		);
 	return rows[0];
@@ -105,12 +106,15 @@ async function outboxTypes(ds: DataSource, orderId: string) {
 }
 
 async function cleanup(ds: DataSource, orderId: string) {
+	const shipment = await shipmentOf(ds, orderId);
 	await ds.query(`DELETE FROM "outbox" WHERE "key" = $1`, [orderId]);
+	if (shipment) {
+		await ds.query(
+			`DELETE FROM "processed_messages" WHERE "consumer" = 'shipping-webhook' AND "eventId" = $1`,
+			[simulatedDeliveryEventId(shipment.id)],
+		);
+	}
 	await ds.query(`DELETE FROM "shipments" WHERE "orderId" = $1`, [orderId]);
-	await ds.query(
-		`DELETE FROM "processed_messages" WHERE "consumer" = 'shipping-webhook' AND "eventId" = $1`,
-		[`${orderId}:delivered`],
-	);
 }
 
 describeWithDb('Shipping (Postgres)', ({ it }) => {
@@ -156,9 +160,9 @@ describeWithDb('Shipping (Postgres)', ({ it }) => {
 		const { send, provider, webhook } = build(ds, 'success');
 		try {
 			await send(MESSAGE_TYPE.CREATE_SHIPMENT, orderId);
-			const { trackingCode } = await shipmentOf(ds, orderId);
+			const { id, trackingCode } = await shipmentOf(ds, orderId);
 			const payload = {
-				eventId: `${orderId}:delivered`,
+				eventId: simulatedDeliveryEventId(id),
 				orderId,
 				trackingCode,
 				status: 'DELIVERED',
@@ -196,9 +200,9 @@ describeWithDb('Shipping (Postgres)', ({ it }) => {
 			await send(MESSAGE_TYPE.CANCEL_SHIPMENT, orderId, {});
 			expect((await shipmentOf(ds, orderId)).status).toBe('CANCELLED');
 
-			const { trackingCode } = await shipmentOf(ds, orderId);
+			const { id, trackingCode } = await shipmentOf(ds, orderId);
 			const payload = {
-				eventId: `${orderId}:delivered`,
+				eventId: simulatedDeliveryEventId(id),
 				orderId,
 				trackingCode,
 				status: 'DELIVERED',

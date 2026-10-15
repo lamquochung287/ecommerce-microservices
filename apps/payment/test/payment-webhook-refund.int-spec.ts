@@ -28,8 +28,8 @@ async function insertIntent(
 	const orderId = randomUUID();
 	await ds.query(
 		`INSERT INTO payment_transactions (id, "orderId", "idempotencyKey", amount, status, "expiresAt", "checkoutUrl")
-		 VALUES ($1, $2, $2, $3, $4, now() + interval '15 minutes', 'http://x')`,
-		[intentId, orderId, amount, status],
+		 VALUES ($1, $2, $3, $4, $5, now() + interval '15 minutes', 'http://x')`,
+		[intentId, orderId, orderId, amount, status],
 	);
 	return { intentId, orderId };
 }

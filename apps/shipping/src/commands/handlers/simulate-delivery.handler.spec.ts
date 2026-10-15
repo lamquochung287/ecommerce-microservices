@@ -7,9 +7,14 @@ import { Shipment, ShipmentStatus } from '../../entities/shipment.entity';
 import { SimulatedShippingProvider } from '../../providers/simulated-shipping.provider';
 import { HandleShippingWebhookCommand } from '../handle-shipping-webhook.command';
 import { SimulateDeliveryCommand } from '../simulate-delivery.command';
-import { SimulateDeliveryHandler } from './simulate-delivery.handler';
+import {
+	SimulateDeliveryHandler,
+	simulatedDeliveryEventId,
+} from './simulate-delivery.handler';
 
 const ORDER_ID = '11111111-1111-4111-8111-111111111111';
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const config = (nodeEnv?: string) =>
 	({
@@ -65,12 +70,25 @@ describe('SimulateDeliveryHandler', () => {
 		const { payload, signature } = (command as HandleShippingWebhookCommand)
 			.dto;
 		expect(payload).toMatchObject({
-			eventId: 'ship-1:delivered',
+			eventId: simulatedDeliveryEventId('ship-1'),
 			orderId: ORDER_ID,
 			trackingCode: 'SIM-1',
 			status: 'DELIVERED',
 		});
+		expect(payload.eventId).toMatch(UUID_PATTERN);
 		expect(provider.verifyWebhook(payload, signature)).toBe(true);
+	});
+
+	it('eventId tất định theo vận đơn: gọi lại cùng vận đơn cho cùng eventId', async () => {
+		const first = setup('development');
+		const second = setup('development');
+
+		await first.handler.execute(new SimulateDeliveryCommand(ORDER_ID));
+		await second.handler.execute(new SimulateDeliveryCommand(ORDER_ID));
+
+		expect(first.commandBus.execute.mock.calls[0][0].dto.payload.eventId).toBe(
+			second.commandBus.execute.mock.calls[0][0].dto.payload.eventId,
+		);
 	});
 
 	it('không có vận đơn: 404', async () => {

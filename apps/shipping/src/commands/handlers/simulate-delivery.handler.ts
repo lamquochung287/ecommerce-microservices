@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { CommandBus, CommandHandler, ICommandHandler } from '@nestjs/cqrs';
@@ -12,6 +13,22 @@ import {
 import { WebhookResult } from './handle-shipping-webhook.handler';
 import { HandleShippingWebhookCommand } from '../handle-shipping-webhook.command';
 import { SimulateDeliveryCommand } from '../simulate-delivery.command';
+
+/**
+ * Định dạng UUID (phiên bản 5, băm SHA-1 của tên) để dùng làm khoá inbox: cột processed_messages.eventId là uuid.
+ */
+function deterministicUuid(name: string): string {
+	const bytes = createHash('sha1').update(name).digest().subarray(0, 16);
+	bytes[6] = (bytes[6] & 0x0f) | 0x50;
+	bytes[8] = (bytes[8] & 0x3f) | 0x80;
+	const hex = bytes.toString('hex');
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** eventId của webhook "đã giao" giả lập, tất định theo vận đơn. */
+export function simulatedDeliveryEventId(shipmentId: string): string {
+	return deterministicUuid(`shipment:${shipmentId}:delivered`);
+}
 
 /**
  * Đóng vai carrier: dựng webhook "đã giao" có ký rồi chạy qua HandleShippingWebhook, tức đúng đường
@@ -48,7 +65,7 @@ export class SimulateDeliveryHandler implements ICommandHandler<SimulateDelivery
 		}
 
 		const payload: Record<string, unknown> = {
-			eventId: `${shipment.id}:delivered`,
+			eventId: simulatedDeliveryEventId(shipment.id),
 			orderId: shipment.orderId,
 			trackingCode: shipment.trackingCode,
 			status: 'DELIVERED',
