@@ -1,44 +1,58 @@
-import { canTransition } from './order-status.constant';
+import {
+	canTransition,
+	ORDER_STATUS_TRANSITIONS,
+} from './order-status.constant';
 import { OrderStatus } from './entities/order.entity';
 
+const S = OrderStatus;
+
 describe('canTransition', () => {
-	it('cho phép các transition hợp lệ trong state machine', () => {
-		expect(canTransition(OrderStatus.PENDING, OrderStatus.PROCESSING)).toBe(
-			true,
-		);
-		expect(canTransition(OrderStatus.PENDING, OrderStatus.CANCELLED)).toBe(
-			true,
-		);
-		expect(canTransition(OrderStatus.PROCESSING, OrderStatus.PAID)).toBe(true);
-		expect(canTransition(OrderStatus.PAID, OrderStatus.SHIPPED)).toBe(true);
-		expect(canTransition(OrderStatus.SHIPPED, OrderStatus.DELIVERED)).toBe(
-			true,
-		);
-		expect(canTransition(OrderStatus.DELIVERED, OrderStatus.REFUNDED)).toBe(
-			true,
-		);
+	it.each([
+		[S.PENDING_PAYMENT, S.PAID],
+		[S.PENDING_PAYMENT, S.CANCELLED],
+		[S.PAID, S.FULFILLING],
+		[S.PAID, S.CANCELLED],
+		[S.FULFILLING, S.SHIPPED],
+		[S.FULFILLING, S.CANCELLED],
+		[S.SHIPPED, S.DELIVERED],
+		[S.DELIVERED, S.REFUNDING],
+		[S.DELIVERED, S.COMPLETED],
+		[S.REFUNDING, S.REFUNDED],
+	])('cho phép %s -> %s', (from, to) => {
+		expect(canTransition(from, to)).toBe(true);
 	});
 
-	it('từ chối transition không hợp lệ (nhảy state tuỳ ý)', () => {
-		expect(canTransition(OrderStatus.SHIPPED, OrderStatus.PENDING)).toBe(false);
-		expect(canTransition(OrderStatus.PENDING, OrderStatus.DELIVERED)).toBe(
-			false,
-		);
-		expect(canTransition(OrderStatus.PENDING, OrderStatus.SHIPPED)).toBe(false);
-		expect(canTransition(OrderStatus.DELIVERED, OrderStatus.PENDING)).toBe(
-			false,
-		);
+	it.each([
+		[S.SHIPPED, S.CANCELLED],
+		[S.DELIVERED, S.CANCELLED],
+		[S.COMPLETED, S.REFUNDING],
+		[S.PENDING_PAYMENT, S.FULFILLING],
+		[S.PAID, S.DELIVERED],
+		[S.REFUNDING, S.COMPLETED],
+		[S.SHIPPED, S.PENDING_PAYMENT],
+	])('từ chối %s -> %s', (from, to) => {
+		expect(canTransition(from, to)).toBe(false);
 	});
 
-	it('CANCELLED và REFUNDED là terminal state, không chuyển tiếp được', () => {
-		expect(canTransition(OrderStatus.CANCELLED, OrderStatus.PENDING)).toBe(
-			false,
-		);
-		expect(canTransition(OrderStatus.CANCELLED, OrderStatus.PROCESSING)).toBe(
-			false,
-		);
-		expect(canTransition(OrderStatus.REFUNDED, OrderStatus.DELIVERED)).toBe(
-			false,
-		);
+	it.each([S.CANCELLED, S.REFUNDED, S.COMPLETED])(
+		'%s là terminal, không có cạnh đi ra',
+		(status) => {
+			expect(ORDER_STATUS_TRANSITIONS[status]).toEqual([]);
+		},
+	);
+
+	it('giữ cạnh của Saga cũ cho tới khi gỡ bỏ', () => {
+		expect(canTransition(S.PENDING, S.PROCESSING)).toBe(true);
+		expect(canTransition(S.PENDING, S.CANCELLED)).toBe(true);
+		expect(canTransition(S.PROCESSING, S.PAID)).toBe(true);
+		expect(canTransition(S.PROCESSING, S.CANCELLED)).toBe(true);
+		expect(canTransition(S.PAID, S.SHIPPED)).toBe(true);
+		expect(canTransition(S.DELIVERED, S.REFUNDED)).toBe(true);
+	});
+
+	it('mọi trạng thái đều có mục trong bảng', () => {
+		for (const status of Object.values(S)) {
+			expect(Array.isArray(ORDER_STATUS_TRANSITIONS[status])).toBe(true);
+		}
 	});
 });

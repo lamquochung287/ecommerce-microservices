@@ -22,6 +22,7 @@ import { CommonConfigModule } from '@lib/common';
 import { CachedModule } from '@lib/cached';
 import { MessagingModule } from '@lib/messaging';
 import { OUTBOX_SOURCE } from 'libs/constant/kafka.constant';
+import { OrderTransitionService } from './order-state/order-transition.service';
 import { HealthModule } from './health/health.module';
 import { SagaModule } from './saga/saga.module';
 import { CartModule } from './cart/cart.module';
@@ -54,6 +55,11 @@ export const EventHandlers = [OrderCreatedHandler];
 		CartModule,
 	],
 	controllers: [OrdersController, PaymentEventsController],
-	providers: [...CommandHandlers, ...QueryHandlers, ...EventHandlers],
+	providers: [
+		...CommandHandlers,
+		...QueryHandlers,
+		...EventHandlers,
+		OrderTransitionService,
+	],
 })
 export class OrdersModule {}

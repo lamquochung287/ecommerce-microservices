@@ -10,7 +10,13 @@ import { Review } from '../../entities/review.entity';
 import { ORDER_TCP_CLIENT } from '../../order-client.constant';
 
 const TCP_TIMEOUT_MS = 10000;
-const REVIEWABLE_STATUSES = ['PAID', 'SHIPPED', 'DELIVERED'];
+const REVIEWABLE_STATUSES = [
+	'PAID',
+	'FULFILLING',
+	'SHIPPED',
+	'DELIVERED',
+	'COMPLETED',
+];
 
 interface OrderSummary {
 	id: string;

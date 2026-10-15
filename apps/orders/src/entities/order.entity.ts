@@ -6,13 +6,19 @@ import {
 	UpdateDateColumn,
 	DeleteDateColumn,
 	OneToMany,
+	Index,
 } from 'typeorm';
 import { OrderItem } from './order-item.entity';
 import { Refund } from './refund.entity';
 
 export enum OrderStatus {
+	// PENDING/PROCESSING chỉ phục vụ Saga cũ cho tới khi bị gỡ khỏi enum.
 	PENDING = 'PENDING',
 	PROCESSING = 'PROCESSING',
+	PENDING_PAYMENT = 'PENDING_PAYMENT',
+	FULFILLING = 'FULFILLING',
+	COMPLETED = 'COMPLETED',
+	REFUNDING = 'REFUNDING',
 	PAID = 'PAID',
 	SHIPPED = 'SHIPPED',
 	DELIVERED = 'DELIVERED',
@@ -20,7 +26,18 @@ export enum OrderStatus {
 	REFUNDED = 'REFUNDED',
 }
 
+// Trạng thái hoàn tiền chỉ để hiển thị, không ảnh hưởng state machine của đơn.
+export enum OrderRefundStatus {
+	NONE = 'NONE',
+	PENDING = 'PENDING',
+	SUCCEEDED = 'SUCCEEDED',
+	FAILED = 'FAILED',
+}
+
 @Entity('orders')
+@Index('IDX_orders_status_expires', ['status', 'expiresAt'])
+@Index('IDX_orders_status_delivered', ['status', 'deliveredAt'])
+@Index('IDX_orders_user_status', ['userId', 'status'])
 export class Order {
 	@PrimaryGeneratedColumn('uuid')
 	id: string;
@@ -42,6 +59,50 @@ export class Order {
 
 	@Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.PENDING })
 	status: OrderStatus;
+
+	// Khoá lạc quan: mọi đổi state phải UPDATE ... WHERE version = :v (xem OrderTransitionService).
+	@Column({ type: 'int', default: 1 })
+	version: number;
+
+	@Column({ type: 'timestamptz', nullable: true })
+	expiresAt: Date | null;
+
+	@Column({ type: 'timestamptz', nullable: true })
+	paidAt: Date | null;
+
+	@Column({ type: 'timestamptz', nullable: true })
+	deliveredAt: Date | null;
+
+	@Column({ type: 'varchar', length: 40, nullable: true })
+	cancelReason: string | null;
+
+	@Column({
+		type: 'enum',
+		enum: OrderRefundStatus,
+		default: OrderRefundStatus.NONE,
+	})
+	refundStatus: OrderRefundStatus;
+
+	@Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
+	refundedAmount: number | null;
+
+	@Column({ type: 'timestamptz', nullable: true })
+	refundedAt: Date | null;
+
+	@Column({ type: 'uuid', nullable: true })
+	paymentIntentId: string | null;
+
+	@Column({ type: 'varchar', length: 500, nullable: true })
+	paymentCheckoutUrl: string | null;
+
+	@Column({ type: 'varchar', length: 100, nullable: true })
+	trackingCode: string | null;
+
+	@Column({ type: 'varchar', length: 50, nullable: true })
+	voucherCode: string | null;
+
+	@Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
+	discountAmount: number;
 
 	// Snapshot địa chỉ giao hàng tại thời điểm đặt hàng (không FK sang Address Book của User service)
 	@Column({ type: 'varchar', length: 255 })
