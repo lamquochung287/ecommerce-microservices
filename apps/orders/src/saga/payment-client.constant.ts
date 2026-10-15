@@ -1,1 +1,0 @@
-export const PAYMENT_TCP_CLIENT = 'PAYMENT_TCP_CLIENT';

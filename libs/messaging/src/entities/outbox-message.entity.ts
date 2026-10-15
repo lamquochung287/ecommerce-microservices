@@ -14,7 +14,7 @@ export enum OutboxMessageStatus {
 
 /**
  * Bảng outbox dùng chung; mỗi service chỉ relay row có `source` của mình.
- * Default ở eventId/source/topic/nextAttemptAt giữ cho code ghi outbox kiểu cũ (chỉ eventType+payload) vẫn insert được.
+ * `source` và `topic` bắt buộc do OutboxWriter điền; không có default để ghi thiếu sẽ lỗi thay vì lệch topic.
  */
 @Entity('outbox')
 @Index('IDX_outbox_relay', ['status', 'source', 'seq'])
@@ -31,10 +31,10 @@ export class OutboxMessage {
 	@Column({ type: 'uuid', default: () => 'uuid_generate_v4()' })
 	eventId: string;
 
-	@Column({ type: 'varchar', length: 50, default: 'orders' })
+	@Column({ type: 'varchar', length: 50 })
 	source: string;
 
-	@Column({ type: 'varchar', length: 100, default: 'order-events' })
+	@Column({ type: 'varchar', length: 100 })
 	topic: string;
 
 	/** Partition key Kafka (= orderId) để giữ thứ tự theo đơn. */

@@ -27,10 +27,6 @@ export class CreateProductDto {
 
 	@IsNumber()
 	@Min(0)
-	stock: number;
-
-	@IsNumber()
-	@Min(0)
 	@IsOptional()
 	lowStockThreshold?: number;
 
@@ -64,11 +60,6 @@ export class UpdateProductDto {
 	@Min(0)
 	@IsOptional()
 	price?: number;
-
-	@IsNumber()
-	@Min(0)
-	@IsOptional()
-	stock?: number;
 
 	@IsNumber()
 	@Min(0)
@@ -123,7 +114,7 @@ export class GetProductsFilterDto extends PaginationQueryDto {
 	@IsOptional()
 	search?: string;
 
-	@IsIn(['name', 'price', 'stock', 'createdAt'])
+	@IsIn(['name', 'price', 'createdAt'])
 	@IsOptional()
 	declare sortBy?: string;
 }

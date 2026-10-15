@@ -41,13 +41,20 @@ describe('canTransition', () => {
 		},
 	);
 
-	it('giữ cạnh của Saga cũ cho tới khi gỡ bỏ', () => {
-		expect(canTransition(S.PENDING, S.PROCESSING)).toBe(true);
-		expect(canTransition(S.PENDING, S.CANCELLED)).toBe(true);
-		expect(canTransition(S.PROCESSING, S.PAID)).toBe(true);
-		expect(canTransition(S.PROCESSING, S.CANCELLED)).toBe(true);
-		expect(canTransition(S.PAID, S.SHIPPED)).toBe(true);
-		expect(canTransition(S.DELIVERED, S.REFUNDED)).toBe(true);
+	it('enum chốt: không còn trạng thái PENDING/PROCESSING của luồng đồng bộ cũ', () => {
+		expect(Object.values(S).sort()).toEqual(
+			[
+				'PENDING_PAYMENT',
+				'PAID',
+				'FULFILLING',
+				'SHIPPED',
+				'DELIVERED',
+				'COMPLETED',
+				'CANCELLED',
+				'REFUNDING',
+				'REFUNDED',
+			].sort(),
+		);
 	});
 
 	it('mọi trạng thái đều có mục trong bảng', () => {

@@ -1,1 +1,0 @@
-export const ORDER_TCP_CLIENT = 'ORDER_TCP_CLIENT';

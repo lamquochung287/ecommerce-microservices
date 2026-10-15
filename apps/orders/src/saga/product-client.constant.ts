@@ -1,1 +1,0 @@
-export const PRODUCT_TCP_CLIENT = 'PRODUCT_TCP_CLIENT';

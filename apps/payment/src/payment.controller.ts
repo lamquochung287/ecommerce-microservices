@@ -2,13 +2,12 @@ import { Controller } from '@nestjs/common';
 import { CommandBus, QueryBus } from '@nestjs/cqrs';
 import { MessagePattern, Payload, Transport } from '@nestjs/microservices';
 import { PAYMENT_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
-import { ChargePaymentCommand } from './commands/charge-payment.command';
 import { HandlePaymentWebhookCommand } from './commands/handle-payment-webhook.command';
 import { CreatePaymentIntentCommand } from './commands/create-payment-intent.command';
 import { SimulatePaymentCommand } from './commands/simulate-payment.command';
 import { GetTransactionQuery } from './queries/get-transaction.query';
 import { GetPaymentIntentQuery } from './queries/get-payment-intent.query';
-import { ChargePaymentDto, PaymentWebhookDto } from './dto/charge-payment.dto';
+import { PaymentWebhookDto } from './dto/payment-webhook.dto';
 import {
 	CreatePaymentIntentDto,
 	IntentIdDto,
@@ -21,14 +20,6 @@ export class PaymentController {
 		private readonly commandBus: CommandBus,
 		private readonly queryBus: QueryBus,
 	) {}
-
-	@MessagePattern(
-		{ cmd: PAYMENT_MESSAGE_PATTERN.CHARGE_PAYMENT },
-		Transport.TCP,
-	)
-	async chargePayment(@Payload() dto: ChargePaymentDto) {
-		return this.commandBus.execute(new ChargePaymentCommand(dto));
-	}
 
 	@MessagePattern({ cmd: PAYMENT_MESSAGE_PATTERN.CREATE_INTENT }, Transport.TCP)
 	async createIntent(@Payload() dto: CreatePaymentIntentDto) {

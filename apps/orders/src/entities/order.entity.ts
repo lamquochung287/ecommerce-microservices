@@ -12,9 +12,6 @@ import { OrderItem } from './order-item.entity';
 import { Refund } from './refund.entity';
 
 export enum OrderStatus {
-	// PENDING/PROCESSING chỉ phục vụ Saga cũ cho tới khi bị gỡ khỏi enum.
-	PENDING = 'PENDING',
-	PROCESSING = 'PROCESSING',
 	PENDING_PAYMENT = 'PENDING_PAYMENT',
 	FULFILLING = 'FULFILLING',
 	COMPLETED = 'COMPLETED',
@@ -57,7 +54,11 @@ export class Order {
 	@Column({ type: 'decimal', precision: 10, scale: 2, default: 0 })
 	totalAmount: number;
 
-	@Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.PENDING })
+	@Column({
+		type: 'enum',
+		enum: OrderStatus,
+		default: OrderStatus.PENDING_PAYMENT,
+	})
 	status: OrderStatus;
 
 	// Khoá lạc quan: mọi đổi state phải UPDATE ... WHERE version = :v (xem OrderTransitionService).

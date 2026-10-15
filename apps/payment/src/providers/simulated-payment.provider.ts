@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { ConfigService } from '@nestjs/config';
 import {
-	ChargeResult,
 	CreateIntentInput,
 	PaymentProvider,
 	PaymentSimulator,
@@ -23,14 +22,6 @@ export class SimulatedPaymentProvider
 	implements PaymentProvider, PaymentSimulator
 {
 	constructor(private readonly configService: ConfigService) {}
-
-	charge(orderId: string, amount: number): Promise<ChargeResult> {
-		void amount;
-		return Promise.resolve({
-			success: true,
-			transactionId: `SIMULATED-${orderId}`,
-		});
-	}
 
 	createIntent(input: CreateIntentInput): { checkoutUrl: string } {
 		const base = this.configService

@@ -33,17 +33,25 @@ const ATTRIBUTES: Record<string, string[]> = {
 	Size: ['XS', 'S', 'M', 'L', 'XL'],
 };
 
-// Trọng số trạng thái đơn hàng
+// Trọng số trạng thái đơn hàng (state machine hiện hành, không còn PENDING/PROCESSING).
 const ORDER_STATUSES: [string, number][] = [
-	['PENDING', 10],
-	['PROCESSING', 10],
-	['PAID', 15],
-	['SHIPPED', 15],
-	['DELIVERED', 30],
-	['CANCELLED', 12],
-	['REFUNDED', 8],
+	['PENDING_PAYMENT', 4],
+	['PAID', 8],
+	['FULFILLING', 8],
+	['SHIPPED', 12],
+	['DELIVERED', 18],
+	['COMPLETED', 22],
+	['CANCELLED', 18],
+	['REFUNDED', 10],
 ];
-const PAID_STATUSES = ['PROCESSING', 'PAID', 'SHIPPED', 'DELIVERED', 'REFUNDED'];
+// Đơn đã thu tiền: có giao dịch SUCCEEDED, paidAt.
+const PAID_STATUSES = ['PAID', 'FULFILLING', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'REFUNDED'];
+// Đơn đã giao cho hãng vận chuyển: có trackingCode.
+const SHIPPED_STATUSES = ['SHIPPED', 'DELIVERED', 'COMPLETED', 'REFUNDED'];
+// Đơn đã giao tới khách: có deliveredAt (COMPLETED/REFUNDED chắc chắn đã qua cửa sổ đổi trả hoặc hoàn hàng).
+const DELIVERED_STATUSES = ['DELIVERED', 'COMPLETED', 'REFUNDED'];
+const PAYMENT_TTL_MS = 15 * 60 * 1000;
+const RETURN_WINDOW_DAYS = 7;
 
 const runTag = Date.now().toString(36);
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -174,9 +182,12 @@ async function seed() {
 		console.log(`\n⏳ Products (${NUM_PRODUCTS})...`);
 		const productIds = Array.from({ length: NUM_PRODUCTS }, () => uuidv4());
 		const productPrices = new Map<string, number>();
+		// Tồn kho không nằm ở Product: giữ tạm trong bộ nhớ để ghi thẳng vào stock_items (Inventory).
+		const productStock = new Map<string, number>();
 		const productRows = productIds.map((id, i) => {
 			const price = parseFloat(faker.commerce.price({ min: 10, max: 1000 }));
 			productPrices.set(id, price);
+			productStock.set(id, faker.number.int({ min: 0, max: 1000 }));
 			const name = `${faker.commerce.productName()} ${i}`;
 			return [
 				id,
@@ -184,13 +195,12 @@ async function seed() {
 				`${slugify(name)}-${runTag}-${i}`,
 				faker.lorem.paragraph(),
 				price,
-				faker.number.int({ min: 0, max: 1000 }),
 				pick(categoryIds),
 				pick(brandIds),
 				1, // version
 			];
 		});
-		await insertRows(client, 'products', ['id', 'name', 'slug', 'description', 'price', 'stock', 'category_id', 'brand_id', 'version'], productRows);
+		await insertRows(client, 'products', ['id', 'name', 'slug', 'description', 'price', 'category_id', 'brand_id', 'version'], productRows);
 
 		// 5. Attributes, attribute_values
 		console.log('\n⏳ Attributes & Variants...');
@@ -216,6 +226,7 @@ async function seed() {
 
 		// 6. Product variants + bảng nối variant <-> attribute value
 		const variantRows: any[][] = [];
+		const variantStockRows: any[][] = []; // [productId, variantId, onHand]
 		const variantValueRows: any[][] = [];
 		const variantProducts = faker.helpers.arrayElements(productIds, NUM_PRODUCTS_WITH_VARIANTS);
 		let skuCounter = 0;
@@ -228,34 +239,32 @@ async function seed() {
 				if (usedCombos.has(`${color}/${size}`)) continue;
 				usedCombos.add(`${color}/${size}`);
 				const variantId = uuidv4();
+				variantStockRows.push([productId, variantId, faker.number.int({ min: 0, max: 300 })]);
 				variantRows.push([
 					variantId,
 					productId,
 					`SKU-${runTag}-${skuCounter++}`,
 					Math.random() < 0.5 ? null : round2(basePrice * faker.number.float({ min: 0.9, max: 1.3 })),
-					faker.number.int({ min: 0, max: 300 }),
 					1, // version
 				]);
 				variantValueRows.push([variantId, attrValueIds.get('Color')!.get(color)]);
 				variantValueRows.push([variantId, attrValueIds.get('Size')!.get(size)]);
 			}
 		}
-		await insertRows(client, 'product_variants', ['id', 'product_id', 'sku', 'price', 'stock', 'version'], variantRows);
+		await insertRows(client, 'product_variants', ['id', 'product_id', 'sku', 'price', 'version'], variantRows);
 		await insertRows(client, 'product_variant_attribute_values', ['variant_id', 'attribute_value_id'], variantValueRows);
 
-		// Tồn kho nằm ở Inventory (stock_items): đồng bộ từ stock vừa seed để sản phẩm mới có hàng để đặt.
-		// Chỉ ghi đè onHand; reserved giữ nguyên vì đơn đang chờ có thể đang giữ hàng.
-		await client.query(
-			`INSERT INTO stock_items ("productId", "variantId", "onHand")
-			 SELECT id, NULL, GREATEST(stock, 0) FROM products WHERE "deletedAt" IS NULL
-			 ON CONFLICT ("productId", "variantId") DO UPDATE SET "onHand" = GREATEST(EXCLUDED."onHand", stock_items."reserved")`,
+		// Tồn kho: Inventory là nguồn sự thật (stock_items). Sản phẩm/variant mới seed chưa có dòng nào nên insert thẳng;
+		// reserved = 0 vì seed không tạo reservation.
+		await insertRows(
+			client,
+			'stock_items',
+			['productId', 'variantId', 'onHand', 'reserved'],
+			[
+				...[...productStock].map(([productId, onHand]) => [productId, null, onHand, 0]),
+				...variantStockRows.map(([productId, variantId, onHand]) => [productId, variantId, onHand, 0]),
+			],
 		);
-		await client.query(
-			`INSERT INTO stock_items ("productId", "variantId", "onHand")
-			 SELECT product_id, id, GREATEST(stock, 0) FROM product_variants WHERE "deletedAt" IS NULL
-			 ON CONFLICT ("productId", "variantId") DO UPDATE SET "onHand" = GREATEST(EXCLUDED."onHand", stock_items."reserved")`,
-		);
-		console.log('  -> stock_items đồng bộ từ products/product_variants');
 
 		// 7. Vouchers
 		console.log(`\n⏳ Vouchers (${NUM_VOUCHERS})...`);
@@ -293,7 +302,14 @@ async function seed() {
 			const user = pick(users);
 			const address = pick(addressesByUser.get(user.userId)!);
 			const status = pickWeighted();
-			const createdAt = faker.date.recent({ days: 180 });
+			// Đơn chờ thanh toán phải còn trong hạn 15 phút; DELIVERED mới giao (còn trong cửa sổ đổi trả); các đơn khác rải trong 180 ngày.
+			const DAY_MS = 24 * 3600 * 1000;
+			const createdAt =
+				status === 'PENDING_PAYMENT'
+					? new Date(Date.now() - faker.number.int({ min: 0, max: 10 * 60 * 1000 }))
+					: status === 'DELIVERED'
+						? new Date(Date.now() - faker.number.int({ min: 4 * DAY_MS, max: (RETURN_WINDOW_DAYS + 3) * DAY_MS }))
+						: faker.date.recent({ days: 180 });
 
 			const lines = Array.from({ length: faker.number.int({ min: 1, max: 5 }) }, () => {
 				const productId = pick(productIds);
@@ -304,8 +320,18 @@ async function seed() {
 			const shippingFee = pick([0, 5, 10]);
 			const totalAmount = round2(subtotal + taxAmount + shippingFee);
 
+			const refundAmount = round2(totalAmount - shippingFee); // phí ship không hoàn
+			const expiresAt = status === 'PENDING_PAYMENT' ? new Date(createdAt.getTime() + PAYMENT_TTL_MS) : null;
+			const paidAt = PAID_STATUSES.includes(status) ? createdAt : null;
+			// Giao sau 3 ngày kể từ lúc đặt. DELIVERED còn trong cửa sổ đổi trả (scheduler tự COMPLETED khi quá hạn).
+			const deliveredAt = DELIVERED_STATUSES.includes(status) ? new Date(createdAt.getTime() + 3 * DAY_MS) : null;
+			const cancelReason = status === 'CANCELLED' ? pick(['USER', 'PAYMENT_EXPIRED', 'PAYMENT_FAILED']) : null;
+			const trackingCode = SHIPPED_STATUSES.includes(status) ? `SIM-${runTag}-${n}` : null;
+			const refundedAt = status === 'REFUNDED' ? new Date(createdAt.getTime() + 5 * DAY_MS) : null;
+
 			orderRows.push([
 				orderId, user.userId, subtotal, taxAmount, shippingFee, totalAmount, status,
+				expiresAt, paidAt, deliveredAt, cancelReason, status === 'REFUNDED' ? refundAmount : null, refundedAt, trackingCode,
 				address.recipientName, address.recipientPhone, address.addressLine1, address.addressLine2,
 				address.city, address.province, address.postalCode, address.country, createdAt, createdAt,
 			]);
@@ -314,19 +340,17 @@ async function seed() {
 			// Thanh toán: đơn đã trả tiền -> SUCCEEDED; đơn huỷ -> thỉnh thoảng có giao dịch FAILED
 			if (PAID_STATUSES.includes(status)) {
 				paymentRows.push([orderId, `seed-${runTag}-${orderId}`, totalAmount, 'SUCCEEDED', null, createdAt]);
-			} else if (status === 'CANCELLED' && Math.random() < 0.4) {
+			} else if (status === 'CANCELLED' && cancelReason !== 'USER' && Math.random() < 0.4) {
 				paymentRows.push([orderId, `seed-${runTag}-${orderId}`, totalAmount, 'FAILED', pick(['Insufficient funds', 'Card declined', 'Payment timeout']), createdAt]);
 			}
 
-			// Refund: đơn REFUNDED -> COMPLETED; một phần đơn DELIVERED có yêu cầu hoàn tiền
+			// Refund (hoàn hàng sau giao): đơn REFUNDED -> COMPLETED, số tiền = total - phí ship.
 			if (status === 'REFUNDED') {
-				refundRows.push([orderId, totalAmount, faker.lorem.sentence(), 'COMPLETED', createdAt, createdAt]);
-			} else if (status === 'DELIVERED' && Math.random() < 0.05) {
-				refundRows.push([orderId, round2(lines[0].unitPrice * lines[0].quantity), faker.lorem.sentence(), pick(['PENDING', 'APPROVED', 'REJECTED']), createdAt, createdAt]);
+				refundRows.push([orderId, refundAmount, faker.lorem.sentence(), 'COMPLETED', createdAt, createdAt]);
 			}
 
-			// Review: đơn DELIVERED, ~40% có đánh giá cho 1 sản phẩm
-			if (status === 'DELIVERED' && Math.random() < 0.4) {
+			// Review: đơn đã giao (DELIVERED/COMPLETED), ~40% có đánh giá cho 1 sản phẩm
+			if ((status === 'DELIVERED' || status === 'COMPLETED') && Math.random() < 0.4) {
 				const line = pick(lines);
 				const key = `${user.userId}|${line.productId}|${orderId}`;
 				if (!reviewKeys.has(key)) {
@@ -339,7 +363,7 @@ async function seed() {
 		await insertRows(
 			client,
 			'orders',
-			['id', 'userId', 'subtotal', 'taxAmount', 'shippingFee', 'totalAmount', 'status', 'recipientName', 'recipientPhone', 'addressLine1', 'addressLine2', 'city', 'province', 'postalCode', 'country', 'createdAt', 'updatedAt'],
+			['id', 'userId', 'subtotal', 'taxAmount', 'shippingFee', 'totalAmount', 'status', 'expiresAt', 'paidAt', 'deliveredAt', 'cancelReason', 'refundedAmount', 'refundedAt', 'trackingCode', 'recipientName', 'recipientPhone', 'addressLine1', 'addressLine2', 'city', 'province', 'postalCode', 'country', 'createdAt', 'updatedAt'],
 			orderRows,
 		);
 		await insertRows(client, 'order_items', ['id', 'order_id', 'productId', 'quantity', 'unitPrice'], itemRows);

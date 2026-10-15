@@ -1,11 +1,11 @@
-# Gộp 8 app NestJS vào 1 container để mô phỏng 1 VPS: các process cùng chia sẻ CPU/RAM
+# Gộp 10 app NestJS vào 1 container để mô phỏng 1 VPS: các process cùng chia sẻ CPU/RAM
 # theo giới hạn của container (cpus / mem_limit trong docker-compose.loadtest.yml).
 FROM node:22-slim AS compile
 WORKDIR /usr/src/app
 COPY package*.json ./
 RUN npm ci
 COPY . .
-RUN for app in user product orders payment notification review promotion gateway; do npx nest build $app || exit 1; done
+RUN for app in user product orders payment notification review promotion inventory shipping gateway; do npx nest build $app || exit 1; done
 
 FROM node:22-slim
 ENV NODE_ENV=production

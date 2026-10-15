@@ -38,13 +38,15 @@ services:
     depends_on:
       redis:
         condition: service_started
+      kafka:
+        condition: service_started
       migrate:
         condition: service_completed_successfully
     cpus: ${LT_APPS_CPUS:-0.8}
     mem_limit: ${LT_APPS_MEM:-2560m}
     ports:
       - '3000:3000' # gateway
-      - '9464-9471:9464-9471' # metrics từng service cho prometheus
+      - '9464-9473:9464-9473' # metrics từng service cho prometheus
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
@@ -58,9 +60,15 @@ services:
       JWT_REFRESH_SECRET: loadtest-refresh-secret
       JWT_REFRESH_EXPIRATION: 7d
       API_KEY: ${LT_API_KEY:-loadtest-api-key}
+      # Kafka (service `kafka` của docker-compose.yml, listener nội bộ) cho outbox/inbox giữa các service.
+      KAFKA_BROKERS: kafka:29092
+      PAYMENT_WEBHOOK_SECRET: loadtest-payment-webhook-secret
+      SHIPPING_WEBHOOK_SECRET: loadtest-shipping-webhook-secret
+      # Tự thanh toán thành công sau PAYMENT_SIM_DELAY_MS để đo toàn luồng PAID -> FULFILLING -> SHIPPED.
+      PAYMENT_SIM_MODE: auto-success
       # Các service gọi nhau qua 'localhost' (hardcode); trong container nó phân giải ra ::1 trước nên TCP bị từ chối.
       NODE_OPTIONS: --dns-result-order=ipv4first
-      # Mặc định 50/service × 8 service vượt xa max_connections=100 của Postgres.
+      # Mặc định 50/service × 10 service vượt xa max_connections=100 của Postgres.
       DB_POOL_MAX: ${LT_DB_POOL_MAX:-10}
       MINIO_ENDPOINT: minio
       MINIO_PORT: 9000

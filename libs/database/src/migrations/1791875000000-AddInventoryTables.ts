@@ -61,15 +61,27 @@ export class AddInventoryTables1791875000000 implements MigrationInterface {
 		);
 
 		// Sao chép tồn hiện có; GREATEST vì stock âm sẽ vi phạm CHECK. Chạy lại không ghi đè tồn đã chỉnh ở Inventory.
+		// Cột stock của Product bị gỡ ở migration chốt sau này; DB dựng bằng schema:sync từ entity mới không có cột này
+		// nên chỉ sao chép khi cột còn tồn tại.
 		await queryRunner.query(`
-			INSERT INTO "stock_items" ("productId", "variantId", "onHand")
-			SELECT "id", NULL, GREATEST("stock", 0) FROM "products" WHERE "deletedAt" IS NULL
-			ON CONFLICT DO NOTHING
-		`);
-		await queryRunner.query(`
-			INSERT INTO "stock_items" ("productId", "variantId", "onHand")
-			SELECT "product_id", "id", GREATEST("stock", 0) FROM "product_variants" WHERE "deletedAt" IS NULL
-			ON CONFLICT DO NOTHING
+			DO $$ BEGIN
+				IF EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_schema = 'public' AND table_name = 'products' AND column_name = 'stock'
+				) THEN
+					INSERT INTO "stock_items" ("productId", "variantId", "onHand")
+					SELECT "id", NULL, GREATEST("stock", 0) FROM "products" WHERE "deletedAt" IS NULL
+					ON CONFLICT DO NOTHING;
+				END IF;
+				IF EXISTS (
+					SELECT 1 FROM information_schema.columns
+					WHERE table_schema = 'public' AND table_name = 'product_variants' AND column_name = 'stock'
+				) THEN
+					INSERT INTO "stock_items" ("productId", "variantId", "onHand")
+					SELECT "product_id", "id", GREATEST("stock", 0) FROM "product_variants" WHERE "deletedAt" IS NULL
+					ON CONFLICT DO NOTHING;
+				END IF;
+			END $$;
 		`);
 	}
 

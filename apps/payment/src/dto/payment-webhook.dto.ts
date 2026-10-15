@@ -1,23 +1,4 @@
-import {
-	IsNotEmpty,
-	IsNumber,
-	IsPositive,
-	IsString,
-	IsUUID,
-} from 'class-validator';
-
-export class ChargePaymentDto {
-	@IsUUID()
-	orderId: string;
-
-	@IsNumber()
-	@IsPositive()
-	amount: number;
-
-	@IsString()
-	@IsNotEmpty()
-	idempotencyKey: string;
-}
+import { IsNotEmpty, IsString } from 'class-validator';
 
 export class PaymentWebhookDto {
 	@IsNotEmpty()

@@ -7,11 +7,6 @@ import {
 } from 'libs/constant/message-pattern.constant';
 import { MicroserviceErrorHandler } from '../common/microservice-error.handler';
 import { TcpResilienceService } from '../common/tcp-resilience.service';
-import {
-	CreateOrderDto,
-	UpdateOrderStatusDto,
-} from '../../../orders/src/dto/order.dto';
-import { CreateRefundDto } from '../../../orders/src/dto/refund.dto';
 import { CartItemDto } from '../../../orders/src/cart/cart-item.dto';
 import { CheckoutDto } from '../../../orders/src/dto/checkout.dto';
 
@@ -34,10 +29,6 @@ export class OrdersService {
 		} catch (error) {
 			MicroserviceErrorHandler.handleError(error, action, 'Order service');
 		}
-	}
-
-	createOrder(dto: CreateOrderDto) {
-		return this.send(ORDER_MESSAGE_PATTERN.CREATE_ORDER, dto, 'create order');
 	}
 
 	/** `userId` luôn lấy từ token; Orders tự lấy số lượng từ cart và giá từ Product. */
@@ -83,34 +74,6 @@ export class OrdersService {
 
 	getOrder(id: string) {
 		return this.send(ORDER_MESSAGE_PATTERN.GET_ORDER, { id }, 'get order');
-	}
-
-	updateOrderStatus(id: string, dto: UpdateOrderStatusDto) {
-		return this.send(
-			ORDER_MESSAGE_PATTERN.UPDATE_ORDER_STATUS,
-			{ id, dto },
-			'update order status',
-		);
-	}
-
-	createRefund(dto: CreateRefundDto) {
-		return this.send(ORDER_MESSAGE_PATTERN.CREATE_REFUND, dto, 'create refund');
-	}
-
-	approveRefund(id: string) {
-		return this.send(
-			ORDER_MESSAGE_PATTERN.APPROVE_REFUND,
-			{ id },
-			'approve refund',
-		);
-	}
-
-	rejectRefund(id: string) {
-		return this.send(
-			ORDER_MESSAGE_PATTERN.REJECT_REFUND,
-			{ id },
-			'reject refund',
-		);
 	}
 
 	getRefunds(orderId: string) {

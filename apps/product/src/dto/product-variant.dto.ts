@@ -20,10 +20,6 @@ export class CreateVariantDto {
 	@IsOptional()
 	price?: number;
 
-	@IsNumber()
-	@Min(0)
-	stock: number;
-
 	@IsArray()
 	@ArrayMinSize(1)
 	@IsUUID(undefined, { each: true })
@@ -44,21 +40,4 @@ export class UpdateVariantDto {
 	@IsUUID(undefined, { each: true })
 	@IsOptional()
 	attributeValueIds?: string[];
-}
-
-export class AdjustStockDto {
-	@IsUUID()
-	@IsOptional()
-	productId?: string;
-
-	@IsUUID()
-	@IsOptional()
-	variantId?: string;
-
-	@IsNumber()
-	delta: number;
-
-	@IsString()
-	@IsOptional()
-	reason?: string;
 }

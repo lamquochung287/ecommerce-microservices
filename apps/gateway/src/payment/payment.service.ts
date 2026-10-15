@@ -4,7 +4,7 @@ import { NAME_SERVICE_TCP } from 'libs/constant/port-tcp.constant';
 import { PAYMENT_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
 import { MicroserviceErrorHandler } from '../common/microservice-error.handler';
 import { TcpResilienceService } from '../common/tcp-resilience.service';
-import { PaymentWebhookDto } from '../../../payment/src/dto/charge-payment.dto';
+import { PaymentWebhookDto } from '../../../payment/src/dto/payment-webhook.dto';
 
 @Injectable()
 export class PaymentService {

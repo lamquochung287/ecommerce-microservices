@@ -52,7 +52,6 @@ export class CreateVariantHandler implements ICommandHandler<CreateVariantComman
 			product,
 			sku: dto.sku,
 			price: dto.price ?? null,
-			stock: dto.stock,
 			attributeValues,
 		});
 

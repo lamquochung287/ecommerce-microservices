@@ -31,9 +31,6 @@ export class ProductVariant {
 	@Column({ type: 'decimal', precision: 10, scale: 2, nullable: true })
 	price: number | null;
 
-	@Column({ type: 'int', default: 0 })
-	stock: number;
-
 	@VersionColumn()
 	version: number;
 

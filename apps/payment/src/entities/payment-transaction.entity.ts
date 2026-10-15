@@ -15,8 +15,7 @@ export enum PaymentTransactionStatus {
 	CANCELLED = 'CANCELLED',
 }
 
-// Một dòng = một payment intent của đơn (idempotencyKey = orderId). Giao dịch charge trực tiếp
-// (luồng cũ) cũng nằm ở đây với status SUCCEEDED/FAILED và không có expiresAt/checkoutUrl.
+// Một dòng = một payment intent của đơn (idempotencyKey = orderId).
 @Entity('payment_transactions')
 @Unique(['idempotencyKey'])
 @Index('IDX_payment_transactions_orderId', ['orderId'])

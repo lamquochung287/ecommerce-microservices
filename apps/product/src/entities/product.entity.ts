@@ -36,9 +36,6 @@ export class Product {
 	@Column({ type: 'decimal', precision: 10, scale: 2 })
 	price: number;
 
-	@Column({ type: 'int', default: 0 })
-	stock: number;
-
 	@Column({ type: 'int', default: 10 })
 	lowStockThreshold: number;
 

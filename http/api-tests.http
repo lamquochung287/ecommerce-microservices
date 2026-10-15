@@ -159,7 +159,6 @@ Content-Type: application/json
   "slug": "test-product",
   "description": "This is a product created via API test",
   "price": 199.99,
-  "stock": 50,
   "categoryId": "00000000-0000-0000-0000-000000000000"
 }
 

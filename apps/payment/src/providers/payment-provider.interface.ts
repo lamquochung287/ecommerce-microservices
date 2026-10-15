@@ -1,9 +1,3 @@
-export interface ChargeResult {
-	success: boolean;
-	transactionId?: string;
-	failureReason?: string;
-}
-
 export interface WebhookVerifyResult {
 	valid: boolean;
 	eventId?: string;
@@ -30,8 +24,6 @@ export interface RefundResult {
 }
 
 export interface PaymentProvider {
-	/** Luồng charge trực tiếp cũ. */
-	charge(orderId: string, amount: number): Promise<ChargeResult>;
 	/** Trả URL để user thanh toán intent. */
 	createIntent(input: CreateIntentInput): { checkoutUrl: string };
 	refund(input: RefundInput): Promise<RefundResult>;

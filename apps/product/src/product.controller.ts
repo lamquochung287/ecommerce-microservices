@@ -14,7 +14,6 @@ import { DeleteAttributeCommand } from './commands/delete-attribute.command';
 import { CreateVariantCommand } from './commands/create-variant.command';
 import { UpdateVariantCommand } from './commands/update-variant.command';
 import { DeleteVariantCommand } from './commands/delete-variant.command';
-import { AdjustStockCommand } from './commands/adjust-stock.command';
 import { GetProductsQuery } from './queries/get-products.query';
 import { GetProductQuery } from './queries/get-product.query';
 import { GetBrandsQuery } from './queries/get-brands.query';
@@ -27,11 +26,7 @@ import {
 } from './dto/product.dto';
 import { CreateBrandDto, UpdateBrandDto } from './dto/brand.dto';
 import { CreateAttributeDto, UpdateAttributeDto } from './dto/attribute.dto';
-import {
-	AdjustStockDto,
-	CreateVariantDto,
-	UpdateVariantDto,
-} from './dto/product-variant.dto';
+import { CreateVariantDto, UpdateVariantDto } from './dto/product-variant.dto';
 
 @Controller()
 export class ProductController {
@@ -80,11 +75,6 @@ export class ProductController {
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.DELETE_PRODUCT })
 	async deleteProduct(@Payload() data: { id: string }) {
 		return this.commandBus.execute(new DeleteProductCommand(data.id));
-	}
-
-	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.ADJUST_STOCK })
-	async adjustStock(@Payload() dto: AdjustStockDto) {
-		return this.commandBus.execute(new AdjustStockCommand(dto));
 	}
 
 	@MessagePattern({ cmd: PRODUCT_MESSAGE_PATTERN.CREATE_BRAND })

@@ -5,7 +5,7 @@ import { Repository } from 'typeorm';
 import { Product } from '../../entities/product.entity';
 import { buildPaginationMeta } from '@lib/common';
 
-const SORTABLE_FIELDS = new Set(['name', 'price', 'stock', 'createdAt']);
+const SORTABLE_FIELDS = new Set(['name', 'price', 'createdAt']);
 
 @QueryHandler(GetProductsQuery)
 export class GetProductsHandler implements IQueryHandler<GetProductsQuery> {

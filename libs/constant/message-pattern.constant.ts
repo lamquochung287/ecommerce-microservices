@@ -13,7 +13,6 @@ export const PRODUCT_MESSAGE_PATTERN = {
 	GET_PRODUCT: 'get_product',
 	UPDATE_PRODUCT: 'update_product',
 	DELETE_PRODUCT: 'delete_product',
-	ADJUST_STOCK: 'adjust_stock',
 	CREATE_BRAND: 'create_brand',
 	GET_BRANDS: 'get_brands',
 	UPDATE_BRAND: 'update_brand',
@@ -29,13 +28,8 @@ export const PRODUCT_MESSAGE_PATTERN = {
 };
 
 export const ORDER_MESSAGE_PATTERN = {
-	CREATE_ORDER: 'create_order',
 	GET_ORDERS: 'get_orders',
 	GET_ORDER: 'get_order',
-	UPDATE_ORDER_STATUS: 'update_order_status',
-	CREATE_REFUND: 'create_refund',
-	APPROVE_REFUND: 'approve_refund',
-	REJECT_REFUND: 'reject_refund',
 	GET_REFUNDS: 'get_refunds',
 	CHECKOUT: 'checkout_order',
 	GET_PAYMENT_LINK: 'get_order_payment_link',
@@ -73,17 +67,11 @@ export const ROLE_MESSAGE_PATTERN = {
 };
 
 export const PAYMENT_MESSAGE_PATTERN = {
-	CHARGE_PAYMENT: 'charge_payment',
 	HANDLE_WEBHOOK: 'handle_payment_webhook',
 	GET_TRANSACTION: 'get_transaction',
 	CREATE_INTENT: 'create_payment_intent',
 	GET_INTENT: 'get_payment_intent',
 	SIMULATE_PAYMENT: 'simulate_payment',
-};
-
-export const PAYMENT_EVENT_PATTERN = {
-	PAYMENT_SUCCEEDED: 'payment_succeeded',
-	PAYMENT_FAILED: 'payment_failed',
 };
 
 export const NOTIFICATION_MESSAGE_PATTERN = {

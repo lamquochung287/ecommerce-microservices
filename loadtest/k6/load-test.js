@@ -25,7 +25,7 @@ const HOLD = __ENV.HOLD || '5m';
 // Access token sống 15 phút và gateway chưa có endpoint refresh, nên login lại trước hạn.
 const TOKEN_MAX_AGE_MS = 14 * 60 * 1000;
 
-// 400/409/422 = checkout bị từ chối theo nghiệp vụ (vd hết hàng, giỏ rỗng), không tính là lỗi server.
+// 400/409/422 = checkout bị từ chối theo nghiệp vụ (vd hết hàng, món không có trong giỏ), không tính là lỗi server.
 const CHECKOUT_REJECTED = [400, 409, 422];
 
 // Tỉ lệ [browse, cart, checkout] theo profile; auth chỉ login lặp lại.
@@ -84,10 +84,18 @@ export const options = {
 	summaryTrendStats: ['avg', 'med', 'p(90)', 'p(95)', 'p(99)', 'max'],
 };
 
-function headers(token) {
-	const h = { 'Content-Type': 'application/json', 'x-api-key': API_KEY };
+function headers(token, extra) {
+	const h = { 'Content-Type': 'application/json', 'x-api-key': API_KEY, ...extra };
 	if (token) h.Authorization = `Bearer ${token}`;
 	return h;
+}
+
+// Gateway bắt buộc x-idempotency-key cho checkout; mỗi lần gọi một key mới dạng UUID v4.
+function uuidv4() {
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+		const r = (Math.random() * 16) | 0;
+		return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+	});
 }
 
 // 0 = lỗi mạng/timeout phía k6, 408 = gateway quá hạn chờ service, 429 = bị throttle, 5xx = lỗi server.
@@ -180,19 +188,32 @@ function cart(ids, jwt) {
 	);
 }
 
+// Checkout v2: chỉ gửi định danh món được chọn (số lượng lấy từ giỏ, giá lấy từ Product) và địa chỉ.
+// Kết quả mong đợi là 201 PENDING_PAYMENT kèm payment_url; k6 không thanh toán nên đơn tự hết hạn sau
+// ORDER_PAYMENT_TTL_SECONDS và hàng được trả lại, cùng sản phẩm thì lần checkout sau thay thế đơn cũ.
 function checkout(ids, jwt) {
-	addToCart(ids, jwt);
+	const productId = pick(ids);
+	track(
+		http.post(`${BASE_URL}/cart/items`, JSON.stringify({ productId, quantity: 1 }), {
+			headers: headers(jwt),
+			tags: { name: 'POST /cart/items' },
+		}),
+		cartDuration,
+	);
 	const res = http.post(
 		`${BASE_URL}/cart/checkout`,
 		JSON.stringify({
-			recipientName: 'Load Test',
-			recipientPhone: '0900000000',
-			addressLine1: '1 Test Street',
-			city: 'Ho Chi Minh',
-			country: 'VN',
+			items: [{ productId }],
+			shippingAddress: {
+				recipientName: 'Load Test',
+				recipientPhone: '0900000000',
+				addressLine1: '1 Test Street',
+				city: 'Ho Chi Minh',
+				country: 'VN',
+			},
 		}),
 		{
-			headers: headers(jwt),
+			headers: headers(jwt, { 'x-idempotency-key': uuidv4() }),
 			tags: { name: 'POST /cart/checkout' },
 			// 400/409/422 = bị từ chối theo nghiệp vụ (vd hết hàng), không phải lỗi server.
 			responseCallback: http.expectedStatuses({ min: 200, max: 299 }, ...CHECKOUT_REJECTED),

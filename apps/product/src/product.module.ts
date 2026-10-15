@@ -14,7 +14,6 @@ import { DeleteAttributeHandler } from './commands/handlers/delete-attribute.han
 import { CreateVariantHandler } from './commands/handlers/create-variant.handler';
 import { UpdateVariantHandler } from './commands/handlers/update-variant.handler';
 import { DeleteVariantHandler } from './commands/handlers/delete-variant.handler';
-import { AdjustStockHandler } from './commands/handlers/adjust-stock.handler';
 import { GetProductsHandler } from './queries/handlers/get-products.handler';
 import { GetProductHandler } from './queries/handlers/get-product.handler';
 import { GetBrandsHandler } from './queries/handlers/get-brands.handler';
@@ -45,7 +44,6 @@ export const CommandHandlers = [
 	CreateVariantHandler,
 	UpdateVariantHandler,
 	DeleteVariantHandler,
-	AdjustStockHandler,
 ];
 export const QueryHandlers = [
 	GetProductsHandler,

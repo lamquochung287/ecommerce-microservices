@@ -49,7 +49,7 @@ export class CreateReviewHandler implements ICommandHandler<CreateReviewCommand>
 		}
 
 		// Không tin tưởng userId/productId client tự khai — verify order thật sự thuộc user này,
-		// đã ở trạng thái đủ để coi là "đã mua" (không cho review khi còn PENDING/PROCESSING), và
+		// đã ở trạng thái đủ để coi là "đã mua" (không cho review khi còn PENDING_PAYMENT/PAID/CANCELLED), và
 		// có chứa đúng sản phẩm muốn review.
 		const belongsToUser =
 			(order as unknown as { userId: string }).userId === userId;
