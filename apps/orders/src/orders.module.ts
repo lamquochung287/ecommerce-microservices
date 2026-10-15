@@ -33,6 +33,8 @@ import { OrderCancellationService } from './order-state/order-cancellation.servi
 import { OrderPricingService } from './pricing/order-pricing.service';
 import { HandlePaymentEventHandler } from './commands/handlers/handle-payment-event.handler';
 import { HandleInventoryEventHandler } from './commands/handlers/handle-inventory-event.handler';
+import { HandleShippingEventHandler } from './commands/handlers/handle-shipping-event.handler';
+import { ShippingEventsConsumer } from './messaging/shipping-events.consumer';
 import { PaymentEventsConsumer } from './messaging/payment-events.consumer';
 import { InventoryEventsConsumer } from './messaging/inventory-events.consumer';
 
@@ -41,6 +43,7 @@ export const CommandHandlers = [
 	PreparePaymentHandler,
 	HandlePaymentEventHandler,
 	HandleInventoryEventHandler,
+	HandleShippingEventHandler,
 	CreateOrderHandler,
 	UpdateOrderStatusHandler,
 	ConfirmOrderPaymentHandler,
@@ -73,6 +76,7 @@ export const EventHandlers = [OrderCreatedHandler];
 		PaymentEventsController,
 		PaymentEventsConsumer,
 		InventoryEventsConsumer,
+		ShippingEventsConsumer,
 	],
 	providers: [
 		...CommandHandlers,
