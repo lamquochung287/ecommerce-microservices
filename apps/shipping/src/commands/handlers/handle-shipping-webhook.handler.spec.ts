@@ -13,6 +13,8 @@ import {
 } from './handle-shipping-webhook.handler';
 
 const ORDER_ID = '11111111-1111-4111-8111-111111111111';
+// Cột processed_messages.eventId là uuid: eventId webhook phải đúng định dạng UUID.
+const EVENT_ID = '22222222-2222-4222-8222-222222222222';
 const DELIVERED_AT = '2026-10-15T10:00:00.000Z';
 
 // Dùng provider mô phỏng thật để HMAC được kiểm bằng đúng thuật toán sản xuất.
@@ -22,7 +24,7 @@ const provider = new SimulatedShippingProvider({
 } as unknown as ConfigService);
 
 const payload = (overrides: Record<string, unknown> = {}) => ({
-	eventId: 'ship-1:delivered',
+	eventId: EVENT_ID,
 	orderId: ORDER_ID,
 	trackingCode: 'SIM-1',
 	status: 'DELIVERED',
@@ -113,7 +115,7 @@ describe('HandleShippingWebhookHandler', () => {
 		expect(inbox.tryAcquire).toHaveBeenCalledWith(
 			manager,
 			SHIPPING_WEBHOOK_CONSUMER,
-			'ship-1:delivered',
+			EVENT_ID,
 		);
 		expect(manager.update).toHaveBeenCalledWith(Shipment, 'ship-1', {
 			status: ShipmentStatus.DELIVERED,
@@ -172,6 +174,7 @@ describe('HandleShippingWebhookHandler', () => {
 		['status khác DELIVERED', { status: 'LOST' }],
 		['deliveredAt không phải ISO', { deliveredAt: 'yesterday' }],
 		['thiếu eventId', { eventId: '' }],
+		['eventId không phải UUID', { eventId: 'ship-1:delivered' }],
 		['thiếu trackingCode', { trackingCode: undefined }],
 	])('payload đã ký nhưng sai schema (%s): 400', async (_name, override) => {
 		const { dataSource, run } = setup();

@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/unbound-method, @typescript-eslint/require-await -- mock jest.fn()/supertest trả any */
 import { ClientProxy } from '@nestjs/microservices';
-import { NEVER, of } from 'rxjs';
+import { NEVER, of, throwError } from 'rxjs';
 import { TcpResilienceService } from './tcp-resilience.service';
 
 const clientReturning = (observable: unknown) =>
@@ -29,6 +29,35 @@ describe('TcpResilienceService', () => {
 			service.send('svc-short', client, { cmd: 'x' }, {}, 30),
 		).rejects.toMatchObject({ name: 'TimeoutError' });
 		expect(Date.now() - startedAt).toBeLessThan(2000);
+	});
+
+	it('lỗi 4xx từ service không mở breaker: request hợp lệ sau đó vẫn được gọi', async () => {
+		const badRequest = {
+			statusCode: 400,
+			message: 'Invalid webhook signature',
+		};
+		const client = clientReturning(throwError(() => badRequest));
+		for (let i = 0; i < 5; i++) {
+			await expect(
+				service.send('svc-4xx', client, { cmd: 'x' }, {}),
+			).rejects.toEqual(badRequest);
+		}
+		const healthy = clientReturning(of({ ok: true }));
+		await expect(
+			service.send('svc-4xx', healthy, { cmd: 'x' }, {}),
+		).resolves.toEqual({ ok: true });
+	});
+
+	it('lỗi 5xx từ service vẫn mở breaker và fail-fast', async () => {
+		const serverError = { statusCode: 500, message: 'boom' };
+		const client = clientReturning(throwError(() => serverError));
+		await expect(
+			service.send('svc-5xx', client, { cmd: 'x' }, {}),
+		).rejects.toEqual(serverError);
+		const healthy = clientReturning(of({ ok: true }));
+		await expect(
+			service.send('svc-5xx', healthy, { cmd: 'x' }, {}),
+		).rejects.toMatchObject({ message: expect.stringMatching(/breaker/i) });
 	});
 
 	it('mặc định giữ timeout 10s (không timeout sớm khi không truyền)', async () => {

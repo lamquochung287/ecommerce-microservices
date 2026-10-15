@@ -96,8 +96,9 @@ export class HandleShippingWebhookHandler implements ICommandHandler<HandleShipp
 	// Payload đã qua HMAC nhưng vẫn kiểm hình dạng: secret đúng không bảo đảm người ký gửi đúng schema.
 	private parse(payload: Record<string, unknown>): ParsedWebhook {
 		const { eventId, orderId, trackingCode, status, deliveredAt } = payload;
-		if (typeof eventId !== 'string' || eventId.length === 0) {
-			throw badRequest('Webhook eventId is required');
+		// eventId là khoá inbox (cột uuid): sai định dạng phải trả 400, không để lỗi DB thành 500 và carrier retry mãi.
+		if (typeof eventId !== 'string' || !isUUID(eventId)) {
+			throw badRequest('Webhook eventId must be a UUID');
 		}
 		if (typeof orderId !== 'string' || !isUUID(orderId)) {
 			throw badRequest('Webhook orderId must be a UUID');

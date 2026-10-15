@@ -4,12 +4,23 @@ import { firstValueFrom, timeout } from 'rxjs';
 import * as CircuitBreaker from 'opossum';
 
 export const DEFAULT_TCP_TIMEOUT_MS = 10000;
+
+/**
+ * Lỗi 4xx do microservice trả về (400 sai dữ liệu/chữ ký, 404, 409...) là kết quả nghiệp vụ, không phải
+ * service unhealthy. Nếu đếm vào breaker, vài request sai từ client sẽ làm mở circuit và mọi call sau đó bị 502.
+ */
+export const isClientError = (error: unknown): boolean => {
+	const status = (error as { statusCode?: unknown } | null)?.statusCode;
+	return typeof status === 'number' && status >= 400 && status < 500;
+};
+
 const BREAKER_OPTIONS: CircuitBreaker.Options = {
 	timeout: false, // timeout đã xử lý bằng RxJS timeout() ở gọi client.send, breaker chỉ đếm success/fail
 	errorThresholdPercentage: 50, // mở breaker khi >50% request lỗi trong rolling window
 	resetTimeout: 15000, // sau 15s ở trạng thái open, breaker chuyển sang half-open để thử lại
 	rollingCountTimeout: 10000,
 	rollingCountBuckets: 10,
+	errorFilter: isClientError, // lỗi 4xx không được tính là lỗi hạ tầng
 };
 
 // opossum's TS generic inference không suy ra đúng tuple từ constructor function,
