@@ -94,3 +94,81 @@ describe('OrderCancellationService.cancelUnpaid', () => {
 		).rejects.toBe(conflict);
 	});
 });
+
+describe('OrderCancellationService.cancelPaid', () => {
+	const paidOrder = (extra: Partial<Order> = {}) =>
+		order({
+			status: OrderStatus.PAID,
+			totalAmount: '230000.00' as unknown as number,
+			shippingFee: '30000.00' as unknown as number,
+			...extra,
+		});
+
+	it('restock=false: RefundPayment = total - ship + OrderCancelled{paid:true}, refundStatus PENDING', async () => {
+		const { service, transition } = setup();
+		await service.cancelPaid(
+			manager,
+			paidOrder({ voucherCode: 'SALE10' }),
+			OrderCancelReason.INVENTORY_COMMIT_FAILED,
+			{ restock: false },
+		);
+
+		const input = transition.mock.calls[0][1];
+		expect(input.to).toBe(OrderStatus.CANCELLED);
+		expect(input.patch).toEqual({
+			cancelReason: 'INVENTORY_COMMIT_FAILED',
+			refundStatus: 'PENDING',
+		});
+		expect(input.messages).toEqual([
+			{
+				topic: KAFKA_TOPIC.PAYMENT_COMMANDS,
+				type: MESSAGE_TYPE.REFUND_PAYMENT,
+				payload: { amount: 200000, reason: 'INVENTORY_COMMIT_FAILED' },
+			},
+			{
+				topic: KAFKA_TOPIC.ORDER_EVENTS,
+				type: MESSAGE_TYPE.ORDER_CANCELLED,
+				payload: {
+					userId: 'u-1',
+					paid: true,
+					cancelReason: 'INVENTORY_COMMIT_FAILED',
+					voucherCode: 'SALE10',
+				},
+			},
+		]);
+	});
+
+	it('restock + cancelShipment: thêm RestockInventory và CancelShipment trước OrderCancelled', async () => {
+		const { service, transition } = setup();
+		await service.cancelPaid(manager, paidOrder(), OrderCancelReason.USER, {
+			restock: true,
+			cancelShipment: true,
+		});
+
+		const messages = transition.mock.calls[0][1].messages;
+		expect(
+			messages.map((m: { type: string; topic: string }) => [m.topic, m.type]),
+		).toEqual([
+			[KAFKA_TOPIC.PAYMENT_COMMANDS, MESSAGE_TYPE.REFUND_PAYMENT],
+			[KAFKA_TOPIC.INVENTORY_COMMANDS, MESSAGE_TYPE.RESTOCK_INVENTORY],
+			[KAFKA_TOPIC.SHIPPING_COMMANDS, MESSAGE_TYPE.CANCEL_SHIPMENT],
+			[KAFKA_TOPIC.ORDER_EVENTS, MESSAGE_TYPE.ORDER_CANCELLED],
+		]);
+		expect(messages[3].payload).toEqual({
+			userId: 'u-1',
+			paid: true,
+			cancelReason: 'USER',
+		});
+	});
+
+	it('lỗi lệch version từ transition được truyền ra ngoài', async () => {
+		const { service, transition } = setup();
+		const conflict = new Error('conflict');
+		transition.mockRejectedValue(conflict);
+		await expect(
+			service.cancelPaid(manager, paidOrder(), OrderCancelReason.USER, {
+				restock: true,
+			}),
+		).rejects.toBe(conflict);
+	});
+});

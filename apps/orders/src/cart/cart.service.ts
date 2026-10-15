@@ -58,6 +58,27 @@ export class CartService {
 		return this.save(userId, cart);
 	}
 
+	/**
+	 * Trừ đúng phần đã đặt khỏi giỏ: số lượng còn lại <= 0 thì xoá dòng, phần dư (user thêm khi chờ
+	 * thanh toán) và món không thuộc đơn giữ nguyên, món user đã tự xoá bị bỏ qua. Không ghi khi không có gì đổi.
+	 */
+	async deductItems(
+		userId: string,
+		items: ReadonlyArray<{ productId: string; quantity: number }>,
+	): Promise<Cart> {
+		const cart = await this.getCart(userId);
+		let changed = false;
+		for (const ordered of items) {
+			const line = cart.items.find((i) => i.productId === ordered.productId);
+			if (!line) continue;
+			line.quantity -= ordered.quantity;
+			changed = true;
+		}
+		if (!changed) return cart;
+		cart.items = cart.items.filter((i) => i.quantity > 0);
+		return this.save(userId, cart);
+	}
+
 	async clearCart(userId: string): Promise<void> {
 		await this.cachedService.del(this.key(userId));
 	}

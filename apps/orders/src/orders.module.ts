@@ -31,10 +31,16 @@ import { CheckoutHandler } from './commands/handlers/checkout.handler';
 import { PreparePaymentHandler } from './commands/handlers/prepare-payment.handler';
 import { OrderCancellationService } from './order-state/order-cancellation.service';
 import { OrderPricingService } from './pricing/order-pricing.service';
+import { HandlePaymentEventHandler } from './commands/handlers/handle-payment-event.handler';
+import { HandleInventoryEventHandler } from './commands/handlers/handle-inventory-event.handler';
+import { PaymentEventsConsumer } from './messaging/payment-events.consumer';
+import { InventoryEventsConsumer } from './messaging/inventory-events.consumer';
 
 export const CommandHandlers = [
 	CheckoutHandler,
 	PreparePaymentHandler,
+	HandlePaymentEventHandler,
+	HandleInventoryEventHandler,
 	CreateOrderHandler,
 	UpdateOrderStatusHandler,
 	ConfirmOrderPaymentHandler,
@@ -62,7 +68,12 @@ export const EventHandlers = [OrderCreatedHandler];
 		CartModule,
 		ServiceClientsModule,
 	],
-	controllers: [OrdersController, PaymentEventsController],
+	controllers: [
+		OrdersController,
+		PaymentEventsController,
+		PaymentEventsConsumer,
+		InventoryEventsConsumer,
+	],
 	providers: [
 		...CommandHandlers,
 		...QueryHandlers,
