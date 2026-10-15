@@ -15,7 +15,7 @@ Mục tiêu: 500 user đồng thời trên VPS **4 vCPU / 8 GB** chạy cả Kaf
 
 Container `apps` cần Kafka (service `kafka` của `docker-compose.yml`, `KAFKA_BROKERS=kafka:29092`) cùng `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` (đã đặt trong `docker-compose.loadtest.yml`). Image chạy `NODE_ENV=production` làm simulator bị tắt (không đơn nào thanh toán được), nên compose loadtest đặt `NODE_ENV=development`; biến này chỉ được các simulator đọc. `PAYMENT_SIM_MODE` mặc định `manual` (k6 tự thanh toán qua `/simulator/pay`), đổi bằng `LT_PAYMENT_SIM_MODE=auto-success` nếu muốn Payment tự thanh toán sau `LT_PAYMENT_SIM_DELAY_MS`. Shipping tự "đã giao" sau `LT_SHIPPING_DELIVER_DELAY_MS` (mặc định 5000ms, `0` = tắt), hạn thanh toán/giữ hàng đặt bằng `LT_ORDER_PAYMENT_TTL_SECONDS` (mặc định 900).
 
-Phân bổ quota (tổng 4 CPU / 8 GB, đổi bằng biến `LT_*`): apps 1.8 CPU / 4.5 GB, postgres 1.0 CPU / 1 GB, redis 0.2 CPU / 0.5 GB, kafka 1.0 CPU / 2 GB (`LT_KAFKA_CPUS`, `LT_KAFKA_MEM`). Prometheus, Grafana, Jaeger và các exporter không tính vào quota (trên VPS thật nên chạy ở máy khác).
+Phân bổ quota (tổng 4 CPU / 8 GB, đổi bằng biến `LT_*`): apps 1.8 CPU / 4 GB, postgres 1.0 CPU / 1 GB, redis 0.2 CPU / 1 GB, kafka 1.0 CPU / 2 GB (`LT_KAFKA_CPUS`, `LT_KAFKA_MEM`). Prometheus, Grafana, Jaeger và các exporter không tính vào quota (trên VPS thật nên chạy ở máy khác).
 
 ## Chạy
 
@@ -56,7 +56,7 @@ SLO trong `thresholds` của kịch bản: lỗi server < 1% (5xx, timeout, 429)
 3. Quy đổi:
    - Đạt SLO ở 500 user với CPU dưới ~70% quota: 4 vCPU / 8 GB đủ, có dư địa.
    - Đạt SLO nhưng CPU gần trần: 4 vCPU đủ ở mức 500 nhưng không có dự phòng; nên lên 6–8 vCPU cho đỉnh tải.
-   - Không đạt: xem container nào chạm trần. Thiếu CPU `apps` thì tăng vCPU; RAM `apps` gần 4.5 GB thì tăng RAM; Postgres chạm trần thì tách DB hoặc thêm index/cache; Kafka chạm trần (lag consumer tăng) thì tăng CPU/RAM broker.
+   - Không đạt: xem container nào chạm trần. Thiếu CPU `apps` thì tăng vCPU; RAM `apps` gần 4 GB thì tăng RAM; Postgres chạm trần thì tách DB hoặc thêm index/cache; Kafka chạm trần (lag consumer tăng) thì tăng CPU/RAM broker.
 4. Giữ dự phòng 30–40% so với mức đạt SLO khi chốt cấu hình.
 
 ## Hạn chế của số đo

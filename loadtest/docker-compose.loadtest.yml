@@ -1,7 +1,7 @@
 # Dùng kèm file gốc:
 #   docker compose -f docker-compose.yml -f loadtest/docker-compose.loadtest.yml up -d --build
-# Giới hạn tài nguyên mô phỏng VPS 4 vCPU / 8 GB: apps 1.8 CPU + 4.5 GB, postgres 1.0 CPU + 1 GB,
-# redis 0.2 CPU + 0.5 GB, kafka 1.0 CPU + 2 GB (tổng 4 CPU / 8 GB, chạy cả Kafka). Observability (prometheus, grafana, jaeger, exporter) không tính vào quota.
+# Giới hạn tài nguyên mô phỏng VPS 4 vCPU / 8 GB: apps 1.8 CPU + 4 GB, postgres 1.0 CPU + 1 GB,
+# redis 0.2 CPU + 1 GB, kafka 1.0 CPU + 2 GB (tổng 4 CPU / 8 GB, chạy cả Kafka). Observability (prometheus, grafana, jaeger, exporter) không tính vào quota.
 # Đổi con số bằng biến môi trường LT_* để thử cấu hình khác.
 services:
   postgres:
@@ -10,7 +10,7 @@ services:
 
   redis:
     cpus: ${LT_REDIS_CPUS:-0.2}
-    mem_limit: ${LT_REDIS_MEM:-512m}
+    mem_limit: ${LT_REDIS_MEM:-1g}
 
   # Kafka tính vào quota (JVM, KRaft 1 node). Heap mặc định của image là 1 GB nên 2 GB đủ chỗ cho heap + page cache.
   kafka:
@@ -48,7 +48,7 @@ services:
       migrate:
         condition: service_completed_successfully
     cpus: ${LT_APPS_CPUS:-1.8}
-    mem_limit: ${LT_APPS_MEM:-4608m}
+    mem_limit: ${LT_APPS_MEM:-4g}
     ports:
       - '3000:3000' # gateway
       - '9464-9473:9464-9473' # metrics từng service cho prometheus
