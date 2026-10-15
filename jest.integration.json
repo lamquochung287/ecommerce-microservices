@@ -1,0 +1,26 @@
+{
+  "moduleFileExtensions": [
+    "js",
+    "json",
+    "ts"
+  ],
+  "rootDir": ".",
+  "testRegex": "\\.int-spec\\.ts$",
+  "transform": {
+    "^.+\\.(t|j)s$": "ts-jest"
+  },
+  "testEnvironment": "node",
+  "roots": [
+    "<rootDir>/apps/",
+    "<rootDir>/libs/"
+  ],
+  "moduleNameMapper": {
+    "^@lib/cached(|/.*)$": "<rootDir>/libs/cached/src/$1",
+    "^@lib/common(|/.*)$": "<rootDir>/libs/common/src/$1",
+    "^@lib/database(|/.*)$": "<rootDir>/libs/database/src/$1",
+    "^@lib/media(|/.*)$": "<rootDir>/libs/media/src/$1",
+    "^@lib/messaging(|/.*)$": "<rootDir>/libs/messaging/src/$1",
+    "^libs/constant/(.*)$": "<rootDir>/libs/constant/$1"
+  },
+  "testTimeout": 60000
+}

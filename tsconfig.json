@@ -41,6 +41,12 @@
       ],
       "@lib/media/*": [
         "libs/media/src/*"
+      ],
+      "@lib/messaging": [
+        "libs/messaging/src"
+      ],
+      "@lib/messaging/*": [
+        "libs/messaging/src/*"
       ]
     }
   }

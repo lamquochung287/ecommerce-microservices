@@ -37,6 +37,10 @@ export const ORDER_MESSAGE_PATTERN = {
 	APPROVE_REFUND: 'approve_refund',
 	REJECT_REFUND: 'reject_refund',
 	GET_REFUNDS: 'get_refunds',
+	CHECKOUT: 'checkout_order',
+	GET_PAYMENT_LINK: 'get_order_payment_link',
+	CANCEL_ORDER: 'cancel_order',
+	REQUEST_RETURN: 'request_order_return',
 };
 
 export const CART_MESSAGE_PATTERN = {
@@ -72,6 +76,9 @@ export const PAYMENT_MESSAGE_PATTERN = {
 	CHARGE_PAYMENT: 'charge_payment',
 	HANDLE_WEBHOOK: 'handle_payment_webhook',
 	GET_TRANSACTION: 'get_transaction',
+	CREATE_INTENT: 'create_payment_intent',
+	GET_INTENT: 'get_payment_intent',
+	SIMULATE_PAYMENT: 'simulate_payment',
 };
 
 export const PAYMENT_EVENT_PATTERN = {
@@ -93,4 +100,21 @@ export const PROMOTION_MESSAGE_PATTERN = {
 	GET_VOUCHERS: 'get_vouchers',
 	GET_AVAILABLE_VOUCHERS: 'get_available_vouchers',
 	APPLY_VOUCHER: 'apply_voucher',
+	VALIDATE_VOUCHER: 'validate_voucher',
+	RESERVE_VOUCHER: 'reserve_voucher',
+	RELEASE_VOUCHER: 'release_voucher',
+};
+
+export const INVENTORY_MESSAGE_PATTERN = {
+	RESERVE: 'inventory_reserve',
+	CHECK_RESERVATION: 'inventory_check_reservation',
+	RELEASE: 'inventory_release',
+	ADJUST_STOCK: 'inventory_adjust_stock',
+	GET_AVAILABILITY: 'inventory_get_availability',
+};
+
+export const SHIPPING_MESSAGE_PATTERN = {
+	HANDLE_WEBHOOK: 'handle_shipping_webhook',
+	SIMULATE_DELIVERY: 'simulate_shipping_delivery',
+	GET_SHIPMENT: 'get_shipment',
 };

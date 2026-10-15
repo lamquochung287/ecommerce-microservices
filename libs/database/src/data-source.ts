@@ -8,7 +8,10 @@ export const AppDataSource = new DataSource({
 	username: process.env.DB_USER || 'root',
 	password: process.env.DB_PASSWORD || 'password',
 	database: process.env.DB_NAME || 'ecommerce',
-	entities: [__dirname + '/../../../apps/**/src/**/*.entity{.ts,.js}'],
+	entities: [
+		__dirname + '/../../../apps/**/src/**/*.entity{.ts,.js}',
+		__dirname + '/../../../libs/**/src/**/*.entity{.ts,.js}',
+	],
 	migrations: [__dirname + '/../../../libs/database/src/migrations/*{.ts,.js}'],
 	synchronize: false,
 });

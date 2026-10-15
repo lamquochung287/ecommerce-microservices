@@ -63,6 +63,31 @@ export class EnvironmentVariables {
 	@IsNotEmpty()
 	@IsString()
 	API_KEY: string;
+
+	// Danh sách broker dạng host:port[,host:port]
+	@IsNotEmpty()
+	@IsString()
+	KAFKA_BROKERS: string;
+
+	@IsOptional()
+	@IsNumber()
+	KAFKA_TOPIC_PARTITIONS?: number;
+
+	@IsOptional()
+	@IsNumber()
+	KAFKA_CONSUMER_MAX_ATTEMPTS?: number;
+
+	@IsOptional()
+	@IsNumber()
+	KAFKA_CONSUMER_RETRY_BACKOFF_MS?: number;
+
+	@IsOptional()
+	@IsNumber()
+	OUTBOX_RELAY_INTERVAL_MS?: number;
+
+	@IsOptional()
+	@IsNumber()
+	OUTBOX_MAX_RETRY?: number;
 }
 
 export function validateEnv(config: Record<string, any>) {
