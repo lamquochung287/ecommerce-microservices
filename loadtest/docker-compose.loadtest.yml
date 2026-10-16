@@ -1,11 +1,12 @@
 # Dùng kèm file gốc:
 #   docker compose -f docker-compose.yml -f loadtest/docker-compose.loadtest.yml up -d --build
-# Giới hạn tài nguyên mô phỏng VPS 4 vCPU / 8 GB: apps 1.8 CPU + 4 GB, postgres 1.0 CPU + 1 GB,
-# redis 0.2 CPU + 1 GB, kafka 1.0 CPU + 2 GB (tổng 4 CPU / 8 GB, chạy cả Kafka). Observability (prometheus, grafana, jaeger, exporter) không tính vào quota.
+# Giới hạn tài nguyên mô phỏng VPS: apps (9 service, không gồm gateway) 3.8 CPU + 4 GB, postgres 1.5 CPU + 1 GB,
+# redis 0.2 CPU + 1 GB, kafka 0.5 CPU + 2 GB, gateway 1.0 CPU + 512 MB (tổng 7 CPU / 8.5 GB, chạy cả Kafka).
+# Observability (prometheus, grafana, jaeger, exporter) không tính vào quota.
 # Đổi con số bằng biến môi trường LT_* để thử cấu hình khác.
 services:
   postgres:
-    cpus: ${LT_PG_CPUS:-1.0}
+    cpus: ${LT_PG_CPUS:-1.5}
     mem_limit: ${LT_PG_MEM:-1g}
 
   redis:
@@ -14,7 +15,7 @@ services:
 
   # Kafka tính vào quota (JVM, KRaft 1 node). Heap mặc định của image là 1 GB nên 2 GB đủ chỗ cho heap + page cache.
   kafka:
-    cpus: ${LT_KAFKA_CPUS:-1.0}
+    cpus: ${LT_KAFKA_CPUS:-0.5}
     mem_limit: ${LT_KAFKA_MEM:-2g}
 
   # Bộ migration của dự án chỉ là các bản vá tăng dần (không có CREATE TABLE cho users/orders/products),
@@ -37,7 +38,7 @@ services:
       DB_NAME: ecommerce
 
   apps:
-    build:
+    build: &apps-build
       context: .
       dockerfile: loadtest/Dockerfile.apps
     depends_on:
@@ -47,12 +48,14 @@ services:
         condition: service_started
       migrate:
         condition: service_completed_successfully
-    cpus: ${LT_APPS_CPUS:-1.8}
+    cpus: ${LT_APPS_CPUS:-3.8}
     mem_limit: ${LT_APPS_MEM:-4g}
     ports:
-      - '3000:3000' # gateway
+      - '3000:3000' # gateway (container riêng, dùng chung network của apps)
       - '9464-9473:9464-9473' # metrics từng service cho prometheus
-    environment:
+    environment: &apps-env
+      # Gateway chạy ở 2 container riêng bên dưới.
+      SKIP_APPS: gateway
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: root
@@ -93,6 +96,22 @@ services:
       THROTTLE_LIMIT_DEFAULT: 100000000
       THROTTLE_LOGIN_LIMIT: 100000000
 
+  # Gateway chạy container riêng để có quota CPU riêng (đơn luồng, 1 CPU). Dùng chung network với `apps` vì các service
+  # gọi nhau qua 'localhost' (hardcode), nên gateway phải nằm cùng network namespace để tới được user/product/orders...
+  # Cổng 3000 và metrics 9464 do `apps` publish. Muốn chạy thêm instance: thêm service tương tự với GATEWAY_PORT và
+  # GATEWAY_METRICS_PORT khác, rồi đặt load balancer phía trước (thử 2 instance chưa tăng thông lượng, xem docs).
+  gateway:
+    build: *apps-build
+    network_mode: 'service:apps'
+    depends_on:
+      - apps
+    command: ['node', 'dist/apps/gateway/main.js']
+    cpus: ${LT_GW_CPUS:-1.0}
+    mem_limit: ${LT_GW_MEM:-512m}
+    environment:
+      <<: *apps-env
+      GATEWAY_PORT: 3000
+
   # Cho phép k6 đẩy metric vào Prometheus (xem trên Grafana).
   prometheus:
     command:
@@ -106,7 +125,7 @@ services:
     image: grafana/k6:latest
     profiles: ['k6']
     depends_on:
-      - apps
+      - gateway
       - prometheus
     working_dir: /work
     volumes:
@@ -119,6 +138,8 @@ services:
       TARGET_VUS: ${TARGET_VUS:-500}
       RAMP: ${RAMP:-5m}
       HOLD: ${HOLD:-5m}
+      WAVE_SIZE: ${WAVE_SIZE:-0}
+      WAVE_INTERVAL_S: ${WAVE_INTERVAL_S:-30}
       PAY_RATIO: ${PAY_RATIO:-0.7}
       CANCEL_RATIO: ${CANCEL_RATIO:-0.1}
       K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write

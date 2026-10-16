@@ -6,20 +6,29 @@ import {
 	Inject,
 	Injectable,
 } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { ClientProxy } from '@nestjs/microservices';
 import { Request } from 'express';
 import { firstValueFrom, timeout, catchError, throwError } from 'rxjs';
 import { NAME_SERVICE_TCP } from 'libs/constant/port-tcp.constant';
 import { USER_MESSAGE_PATTERN } from 'libs/constant/message-pattern.constant';
+import { IS_PUBLIC_KEY } from '../decorator/public.decorator';
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
 	constructor(
 		@Inject(NAME_SERVICE_TCP.USER_SERVICE)
 		private readonly userClient: ClientProxy,
+		private readonly reflector: Reflector,
 	) {}
 
 	async canActivate(context: ExecutionContext): Promise<boolean> {
+		const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
+			context.getHandler(),
+			context.getClass(),
+		]);
+		if (isPublic) return true;
+
 		const req = context.switchToHttp().getRequest<Request>();
 		const token = this.extractTokenFromHeader(req);
 

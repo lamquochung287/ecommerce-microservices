@@ -1,5 +1,7 @@
 import { setupTracing } from '@lib/common/tracing/tracing';
-setupTracing('gateway-service', 9464);
+// Tracing phải khởi động trước mọi import khác nên chưa có ConfigService; đọc env trực tiếp ở đây.
+// Chạy nhiều instance gateway cùng network thì mỗi instance đặt GATEWAY_METRICS_PORT riêng.
+setupTracing('gateway-service', Number(process.env.GATEWAY_METRICS_PORT) || 9464);
 
 import { NestFactory } from '@nestjs/core';
 import { GatewayModule } from './gateway.module';

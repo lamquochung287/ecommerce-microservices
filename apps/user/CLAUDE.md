@@ -9,8 +9,8 @@ Chi tiết: [docs/module-processing-flows.md §2](../../docs/module-processing-f
 
 ## Luồng cốt lõi
 - **register**: email trùng → 409; `bcrypt.hash(10)`; user mới `permissions=0`, **không tự gán role**.
-- **login**: sai email/mật khẩu cùng 1 lỗi 401; `sessionId=uuid`; access (`JWT_ACCESS_SECRET`, 15m) + refresh (`JWT_REFRESH_SECRET`, 7d), payload `{sub,email,sessionId}`; Redis `refresh_token:{userId}:{sessionId}` TTL cố định 7 ngày.
-- **verify_token** (Gateway gọi mỗi request): verify access → Redis còn session? → user tồn tại & `isActive` → `permissions` = OR bitmask các Role (null nếu chưa có role → fallback cột `User.permissions`). Mọi lỗi gom thành 401 "Invalid or expired token".
+- **login**: sai email/mật khẩu cùng 1 lỗi 401; `sessionId=uuid`; access (`JWT_ACCESS_SECRET`, 15m) + refresh (`JWT_REFRESH_SECRET`, 7d), payload access `{sub,userId,email,fullName,permissions,sessionId}` (`permissions` = OR bitmask role tại lúc login), payload refresh `{sub,email,sessionId}`; Redis `refresh_token:{userId}:{sessionId}` TTL cố định 7 ngày.
+- **verify_token** (Gateway gọi mỗi request): verify access → Redis còn session? → user tồn tại & `isActive` (truy vấn nhẹ, không join role) → `permissions` lấy từ payload token (không tính lại; đổi role có hiệu lực khi login/cấp token mới). Token cũ không có `permissions` → fallback truy vấn đầy đủ OR bitmask Role (null nếu chưa có role → cột `User.permissions`). Mọi lỗi gom thành 401 "Invalid or expired token".
 - **logout**: `DEL refresh_token:{userId}:{sessionId}` → access token vô hiệu ngay.
 - **Không có refresh endpoint**: access hết hạn = login lại.
 

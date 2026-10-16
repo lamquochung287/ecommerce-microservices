@@ -1,6 +1,6 @@
 # Load test với k6 và sizing VPS
 
-Mục tiêu: 500 user đồng thời trên VPS **4 vCPU / 8 GB** chạy cả Kafka. Stack chạy trong Docker với giới hạn tài nguyên để mô phỏng VPS, k6 chạy trên máy host.
+Mục tiêu: 500 user đồng thời trên VPS **7 vCPU / 8.5 GB** chạy cả Kafka (cấu hình hiện tại; trước đây 6 vCPU, và trước nữa 4 vCPU / 8 GB và `apps` + Postgres chạm trần CPU ở 500 VU). Stack chạy trong Docker với giới hạn tài nguyên để mô phỏng VPS, k6 chạy trên máy host.
 
 ## Thành phần
 
@@ -15,7 +15,9 @@ Mục tiêu: 500 user đồng thời trên VPS **4 vCPU / 8 GB** chạy cả Kaf
 
 Container `apps` cần Kafka (service `kafka` của `docker-compose.yml`, `KAFKA_BROKERS=kafka:29092`) cùng `PAYMENT_WEBHOOK_SECRET`, `SHIPPING_WEBHOOK_SECRET` (đã đặt trong `docker-compose.loadtest.yml`). Image chạy `NODE_ENV=production` làm simulator bị tắt (không đơn nào thanh toán được), nên compose loadtest đặt `NODE_ENV=development`; biến này chỉ được các simulator đọc. `PAYMENT_SIM_MODE` mặc định `manual` (k6 tự thanh toán qua `/simulator/pay`), đổi bằng `LT_PAYMENT_SIM_MODE=auto-success` nếu muốn Payment tự thanh toán sau `LT_PAYMENT_SIM_DELAY_MS`. Shipping tự "đã giao" sau `LT_SHIPPING_DELIVER_DELAY_MS` (mặc định 5000ms, `0` = tắt), hạn thanh toán/giữ hàng đặt bằng `LT_ORDER_PAYMENT_TTL_SECONDS` (mặc định 900).
 
-Phân bổ quota (tổng 4 CPU / 8 GB, đổi bằng biến `LT_*`): apps 1.8 CPU / 4 GB, postgres 1.0 CPU / 1 GB, redis 0.2 CPU / 1 GB, kafka 1.0 CPU / 2 GB (`LT_KAFKA_CPUS`, `LT_KAFKA_MEM`). Prometheus, Grafana, Jaeger và các exporter không tính vào quota (trên VPS thật nên chạy ở máy khác).
+Phân bổ quota (tổng 7 CPU / 8.5 GB, đổi bằng biến `LT_*`): apps (9 service, không gồm gateway) 3.8 CPU / 4 GB, gateway 1.0 CPU / 512 MB (`LT_GW_CPUS`, `LT_GW_MEM`), postgres 1.5 CPU / 1 GB, redis 0.2 CPU / 1 GB, kafka 0.5 CPU / 2 GB (`LT_KAFKA_CPUS`, `LT_KAFKA_MEM`). Prometheus, Grafana, Jaeger và các exporter không tính vào quota (trên VPS thật nên chạy ở máy khác).
+
+Gateway chạy container riêng (`gateway`) nhưng dùng chung network với `apps` (`network_mode: service:apps`), vì các service gọi nhau qua `localhost` cứng. Gateway đơn luồng nên có thể thử nhiều instance; cổng HTTP đặt bằng `GATEWAY_PORT`, cổng metrics bằng `GATEWAY_METRICS_PORT` (mặc định 9464). Đã thử 2 instance sau nginx round-robin với 500 VU: thông lượng không tăng (135 so với 145 req/s) vì nút thắt nằm ở `apps` và Postgres hết CPU chứ không phải Gateway.
 
 ## Chạy
 
@@ -42,7 +44,7 @@ TARGET_VUS=50 RAMP=1m HOLD=1m npm run loadtest:run          # bash
 $env:TARGET_VUS=50; $env:RAMP="1m"; $env:HOLD="1m"; npm run loadtest:run   # PowerShell
 ```
 
-k6 chạy ngoài quota 4 CPU / 8 GB của VPS (tốn CPU của máy host, không ảnh hưởng container `apps`).
+k6 chạy ngoài quota 7 CPU / 8.5 GB của VPS (tốn CPU của máy host, không ảnh hưởng container `apps`).
 
 ## Throttle
 

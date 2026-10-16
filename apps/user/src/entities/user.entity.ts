@@ -16,6 +16,8 @@ export class User {
 	@Index()
 	id: number;
 
+	// VERIFY_TOKEN tra user theo userId ở mọi request nên cần index.
+	@Index('IDX_users_userId', { unique: true })
 	@Column()
 	@Generated('uuid')
 	userId: string;

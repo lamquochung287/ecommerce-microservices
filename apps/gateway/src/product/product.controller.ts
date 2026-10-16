@@ -17,6 +17,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guard/jwt-auth.guard';
 import { PermissionGuard } from '../common/guard/permission.guard';
 import { RequirePermission } from '../common/decorator/require-permission.decorator';
+import { Public } from '../common/decorator/public.decorator';
 import { Action, ModuleName } from 'libs/constant/permission.constant';
 import { ProductService } from './product.service';
 import {
@@ -54,8 +55,9 @@ export class ProductController {
 		return this.productService.createProduct(dto);
 	}
 
+	// Danh sách và chi tiết sản phẩm công khai: không cần đăng nhập (vẫn cần x-api-key).
 	@Get()
-	@RequirePermission(ModuleName.PRODUCT, Action.READ)
+	@Public()
 	async getProducts(@Query() filter: GetProductsFilterDto) {
 		const page = (await this.productService.getProducts(filter)) as
 			| { data?: ProductWithId[]; meta?: unknown }
@@ -75,7 +77,7 @@ export class ProductController {
 	}
 
 	@Get(':id')
-	@RequirePermission(ModuleName.PRODUCT, Action.READ)
+	@Public()
 	async getProduct(@Param('id') id: string) {
 		const product = (await this.productService.getProduct(id)) as
 			| ProductWithId

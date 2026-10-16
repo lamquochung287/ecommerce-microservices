@@ -10,6 +10,8 @@
 //   TARGET_VUS  mặc định 500
 //   RAMP        thời gian tăng tải, mặc định 5m
 //   HOLD        thời gian giữ tải đỉnh, mặc định 5m
+//   WAVE_SIZE   >0 bật chế độ đợt: mỗi đợt WAVE_SIZE user đăng nhập cùng lúc (thay cho RAMP), mặc định 0 (tắt)
+//   WAVE_INTERVAL_S  giây giữa hai đợt, mặc định 30
 //   PAY_RATIO     tỉ lệ đơn checkout được thanh toán qua simulator, mặc định 0.7 (phần còn lại bỏ dở, tự hết hạn)
 //   CANCEL_RATIO  tỉ lệ đơn (sau bước thanh toán) bị user huỷ, mặc định 0.1
 //
@@ -27,6 +29,8 @@ const PROFILE = __ENV.PROFILE || 'mixed';
 const TARGET_VUS = Number(__ENV.TARGET_VUS || 500);
 const RAMP = __ENV.RAMP || '5m';
 const HOLD = __ENV.HOLD || '5m';
+const WAVE_SIZE = Number(__ENV.WAVE_SIZE || 0);
+const WAVE_INTERVAL_S = Number(__ENV.WAVE_INTERVAL_S || 30);
 const PAY_RATIO = Number(__ENV.PAY_RATIO ?? 0.7);
 const CANCEL_RATIO = Number(__ENV.CANCEL_RATIO ?? 0.1);
 
@@ -74,16 +78,25 @@ const orderPaid = new Counter('lt_order_paid'); // simulator ghi nhận thanh to
 const orderCancelled = new Counter('lt_order_cancelled');
 const payUnavailable = new Counter('lt_pay_unavailable'); // simulator bị tắt (404): kiểm NODE_ENV / PAYMENT_SIM_MODE
 
+// Chế độ đợt (WAVE_SIZE > 0): cứ mỗi WAVE_INTERVAL_S giây thêm WAVE_SIZE user trong 1 giây (các user này login cùng lúc),
+// lặp tới TARGET_VUS rồi giữ HOLD. Thay cho RAMP tuyến tính để mô phỏng nhiều user cùng đăng nhập một lúc.
+function buildStages() {
+	if (WAVE_SIZE <= 0) return [{ duration: RAMP, target: TARGET_VUS }, { duration: HOLD, target: TARGET_VUS }];
+	const stages = [];
+	for (let target = WAVE_SIZE; target <= TARGET_VUS; target += WAVE_SIZE) {
+		stages.push({ duration: '1s', target });
+		stages.push({ duration: `${Math.max(1, WAVE_INTERVAL_S - 1)}s`, target });
+	}
+	stages.push({ duration: HOLD, target: TARGET_VUS });
+	return stages;
+}
+
 export const options = {
 	scenarios: {
 		users: {
 			executor: 'ramping-vus',
 			startVUs: 0,
-			stages: [
-				{ duration: RAMP, target: TARGET_VUS },
-				{ duration: HOLD, target: TARGET_VUS },
-				{ duration: '30s', target: 0 },
-			],
+			stages: [...buildStages(), { duration: '30s', target: 0 }],
 			gracefulRampDown: '30s',
 		},
 	},
