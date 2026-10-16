@@ -28,6 +28,7 @@ import { AttributeValue } from './entities/attribute-value.entity';
 import { ProductVariant } from './entities/product-variant.entity';
 
 import { DatabaseModule } from '@lib/database';
+import { CachedModule } from '@lib/cached';
 import { CommonConfigModule } from '@lib/common';
 import { HealthModule } from './health/health.module';
 
@@ -58,6 +59,7 @@ export const EventHandlers = [ProductCreatedHandler];
 	imports: [
 		CommonConfigModule,
 		DatabaseModule,
+		CachedModule,
 		TypeOrmModule.forFeature([
 			Product,
 			Category,
